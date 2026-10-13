@@ -36,6 +36,8 @@ class Settings(BaseModel):
     llm_base_url: str = "https://api.deepseek.com"
     llm_model: str = "deepseek-chat"
     llm_body_chars: int = 4000  # 正文送给模型前截断到这么多字符
+    # 一句话介绍收件人（在读什么、找什么工作、导师是谁），写进提示词，模型判断"谁、要不要管"更准
+    profile: str | None = None
 
     # 推送
     notify_backend: NotifyBackend = "console"
@@ -88,6 +90,7 @@ ENV_MAP: dict[str, str] = {
     "LLM_BASE_URL": "llm_base_url",
     "LLM_MODEL": "llm_model",
     "LLM_BODY_CHARS": "llm_body_chars",
+    "MAIL_MONITOR_PROFILE": "profile",
     "MAIL_MONITOR_NOTIFY": "notify_backend",
     "LARK_DOMAIN": "lark_domain",
     "LARK_WEBHOOK_URL": "lark_webhook_url",

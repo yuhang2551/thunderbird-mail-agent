@@ -1,19 +1,21 @@
 """假的 thunderbird-mcp：用固定数据模拟上游扩展的几个工具，让流水线在没有 Thunderbird 的地方也能跑测试。
 
 工具名、参数名、返回结构照抄上游 v0.9.2（extension/mcp_server/api.js），所以换成真 bridge 时代码不用改。
-用法：python tests/fake_server.py（stdio），数据来自 FAKE_MAILBOX_FIXTURE 指向的 JSON，默认 fixtures/mailbox.json。
+用法：python tests/fake_server.py [fixture.json]（stdio），不传参数时用 FAKE_MAILBOX_FIXTURE 指向的 JSON，默认 fixtures/mailbox.json。
 """
 from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 
-FIXTURE = Path(os.environ.get("FAKE_MAILBOX_FIXTURE", Path(__file__).parent / "fixtures" / "mailbox.json"))
+# 数据来源：命令行第一个参数 > FAKE_MAILBOX_FIXTURE 环境变量 > fixtures/mailbox.json
+FIXTURE = Path(sys.argv[1] if len(sys.argv) > 1 else os.environ.get("FAKE_MAILBOX_FIXTURE", Path(__file__).parent / "fixtures" / "mailbox.json"))
 NOW = datetime.now(timezone.utc)
 HEADER_KEYS = ["id", "threadId", "subject", "author", "recipients", "ccList", "date", "folder", "folderPath", "read", "flagged", "tags", "preview"]
 

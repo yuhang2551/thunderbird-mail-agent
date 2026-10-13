@@ -22,6 +22,7 @@
   "messages": [
     {
       "id": "<prof-1@example.edu>",
+      "threadId": 4242,
       "folderPath": "imap://student%40example.edu@outlook.office365.com/INBOX",
       "author": "Prof. Example <prof@example.edu>",
       "recipients": "student@example.edu",

@@ -1,4 +1,4 @@
-"""流水线：拉新邮件 → 去重 → 规则 → 判断 → （可选）打标签 → 推送 → 记录。
+"""流水线：拉新邮件 → 去重 → 规则 → 取记忆 → 判断 → （可选）打标签 → 推送 → 记录（含更新发件人记忆）。
 
 一次 run_once 就是一次完整的巡检。调度交给 launchd / cron，每几分钟跑一次。
 这里故意写成一条直线，没有上框架：流程是线性的，状态就是一个 RunReport。
@@ -13,13 +13,17 @@ from .classify import Classifier, FallbackClassifier, LLMClassifier
 from .config import Settings
 from .llm import LLMClient
 from .mailbox import Mailbox, MailboxError
+from .memory import recall
 from .models import Decision, MessageHeader
 from .notify import ConsoleNotifier, Notifier, NotifyError, build_notifier
 from .render import render_digest, render_instant
-from .rules import RuleSet
+from .rules import Rule, RuleSet
 from .state import State
 
 log = logging.getLogger(__name__)
+
+# 模型猜的发件人身份至少要这么有把握才写进记忆
+RELATION_MIN_CONFIDENCE = 0.6
 
 
 @dataclass
@@ -34,6 +38,7 @@ class RunReport:
     digest_pending: int = 0
     ignored: int = 0
     tagged: int = 0
+    relations: int = 0  # 这次新记住（或更新）了几个发件人的身份
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -42,6 +47,7 @@ class RunReport:
             f"（规则 {self.by_rule}，模型 {self.by_llm}，保底 {self.by_fallback}）；"
             f"即时推送 {self.pushed}，待汇总 {self.digest_pending}，忽略 {self.ignored}"
             + (f"，打标签 {self.tagged}" if self.tagged else "")
+            + (f"，记住发件人身份 {self.relations} 个" if self.relations else "")
             + (f"；错误 {len(self.errors)} 个" if self.errors else "")
         )
 
@@ -49,7 +55,7 @@ class RunReport:
 def make_classifier(settings: Settings) -> Classifier:
     if settings.llm_enabled:
         client = LLMClient(api_key=settings.llm_api_key or "", base_url=settings.llm_base_url, model=settings.llm_model)
-        return LLMClassifier(client, timezone=settings.timezone, body_chars=settings.llm_body_chars)
+        return LLMClassifier(client, timezone=settings.timezone, body_chars=settings.llm_body_chars, profile=settings.profile)
     log.warning("没有配置 LLM key，所有规则没覆盖的邮件都会按「拿不准」推送")
     return FallbackClassifier()
 
@@ -91,6 +97,7 @@ async def run_once(
 ) -> RunReport:
     report = RunReport()
     rules = rules or RuleSet.load(settings.resolved_rules_path)
+    # dry-run 用内存数据库：不记录、不推送，代价是没有记忆可参考
     state = state or State(":memory:" if dry_run else settings.resolved_db_path)
     notifier = notifier or (ConsoleNotifier() if dry_run else build_notifier(settings))
     classifier = classifier or make_classifier(settings)
@@ -101,12 +108,12 @@ async def run_once(
             new = await fetch_new_headers(mailbox, settings, state, report)
 
             # 先过规则，分成"规则直接定性"和"要读正文交给模型"两堆
-            decided: list[tuple[MessageHeader, Decision]] = []
-            need_llm: list[tuple[MessageHeader, object]] = []
+            decided: list[tuple[MessageHeader, Decision, Rule | None]] = []
+            need_llm: list[tuple[MessageHeader, Rule | None]] = []
             for header in new:
                 rule = rules.match(header)
                 if rule and not rule.then.llm:
-                    decided.append((header, rule.decide(header)))
+                    decided.append((header, rule.decide(header), rule))
                 else:
                     need_llm.append((header, rule))
 
@@ -119,14 +126,15 @@ async def run_once(
             for header, rule in need_llm:
                 body = bodies.get(header.id)
                 text = body.body if body and not body.error else None
-                decision = await classifier.classify(header, text, rule.hints() if rule else None)  # type: ignore[union-attr]
+                memory = recall(state, header)
+                decision = await classifier.classify(header, text, rule.hints() if rule else None, memory)
                 if rule:
-                    decision = rule.apply_overrides(decision)  # type: ignore[union-attr]
-                decided.append((header, decision))
+                    decision = rule.apply_overrides(decision)
+                decided.append((header, decision, rule))
 
             decided.sort(key=lambda item: item[0].date or datetime.min.replace(tzinfo=timezone.utc))
-            for header, decision in decided:
-                await _settle(header, decision, settings, state, mailbox, notifier, report)
+            for header, decision, rule in decided:
+                await _settle(header, decision, rule, settings, state, mailbox, notifier, report)
     except MailboxError as exc:
         report.errors.append(f"连不上 Thunderbird：{exc}")
     finally:
@@ -134,9 +142,22 @@ async def run_once(
     return report
 
 
+def _remember_sender(state: State, header: MessageHeader, decision: Decision, rule: Rule | None) -> bool:
+    """更新发件人记忆：规则写明了"这是谁"就按规则记；否则模型猜得够有把握也记下来。"""
+    email = header.sender_email
+    if not email:
+        return False
+    if rule and rule.then.who:
+        return state.set_sender_relation(email, rule.then.who, source="rule")
+    if decision.decided_by == "llm" and decision.relation and decision.confidence >= RELATION_MIN_CONFIDENCE:
+        return state.set_sender_relation(email, decision.relation, source="llm")
+    return False
+
+
 async def _settle(
     header: MessageHeader,
     decision: Decision,
+    rule: Rule | None,
     settings: Settings,
     state: State,
     mailbox: Mailbox,
@@ -147,6 +168,7 @@ async def _settle(
     report.by_llm += decision.decided_by == "llm"
     report.by_fallback += decision.decided_by == "fallback"
     state.touch_sender(header)
+    report.relations += _remember_sender(state, header, decision, rule)
 
     # 行动：默认只读。打标签要显式打开，而且只给"需要处理"的
     if settings.action_tag and decision.needs_action == "yes":

@@ -84,3 +84,33 @@ async def test_llm_classifier_rejects_guessed_deadline_and_bad_category():
     decision = await LLMClassifier(_client(handler)).classify(header(), None)
     assert decision.needs_action == "unsure" and decision.urgency == "normal"
     assert decision.deadline is None and decision.category == "其他"
+
+
+async def test_llm_prompt_carries_profile_and_memory_and_relation():
+    from mail_monitor.memory import Memory, SenderMemo
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        messages = json.loads(request.content)["messages"]
+        assert "收件人的情况：MBZUAI 在读硕士，找 AI Agent 方向的工作" in messages[0]["content"]
+        assert "relation:" in messages[0]["content"] and "导师、课题组同事" in messages[0]["content"]
+        user = messages[1]["content"]
+        assert "记忆（我们之前的记录，仅供参考）：\n- 发件人 hr@quantfirm.example：身份=HR/招聘方（模型判断）；之前 2 封，其中 1 封需要处理" in user
+        assert user.index("记忆") < user.index("正文开始")
+        verdict = {"who": "量化公司 HR", "relation": " HR/招聘方 ", "what": "面试改到周三", "needs_action": "yes", "confidence": 0.8}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(verdict, ensure_ascii=False)}}]})
+
+    memory = Memory(sender=SenderMemo(email="hr@quantfirm.example", name="Talent Team", relation="HR/招聘方", relation_source="llm", total=2, needs_action=1))
+    classifier = LLMClassifier(_client(handler), timezone="Asia/Dubai", profile="MBZUAI 在读硕士，找 AI Agent 方向的工作")
+    decision = await classifier.classify(header(), "Rescheduled to Wednesday", None, memory)
+    assert decision.relation == "HR/招聘方" and decision.who == "量化公司 HR"
+
+
+async def test_fallback_uses_memory_for_who():
+    from mail_monitor.classify import FallbackClassifier
+    from mail_monitor.memory import Memory, SenderMemo
+
+    memory = Memory(sender=SenderMemo(email="hr@quantfirm.example", name=None, relation="HR/招聘方", relation_source="llm", total=1, needs_action=0))
+    decision = await FallbackClassifier().classify(header(), None, None, memory)
+    assert decision.who == "HR/招聘方 Talent Team" and decision.relation == "HR/招聘方" and decision.needs_action == "unsure"
+    hinted = await FallbackClassifier().classify(header(), None, {"who": "规则说的"}, memory)
+    assert hinted.who == "规则说的"

@@ -1,4 +1,4 @@
-"""命令行入口：mail-monitor doctor | init | run | digest | rules | stats"""
+"""命令行入口：mail-monitor doctor | init | run | digest | rules | stats | senders | sender-set | lark-chats | notify-test"""
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +12,9 @@ from . import __version__
 from .config import Settings, load_settings
 from .mailbox import Mailbox, MailboxError
 from .models import MessageHeader
+from .memory import SOURCE_LABEL
 from .notify import NotifyError, build_notifier
+from .render import fmt_time
 from .rules import RuleSet
 from .state import State
 
@@ -82,6 +84,10 @@ def doctor() -> None:
         typer.echo(f"✅ 模型：{settings.llm_model} @ {settings.llm_base_url}")
     else:
         typer.echo("⚠️  没有 LLM key（DEEPSEEK_API_KEY）：规则没覆盖的邮件会按「拿不准」全部推送")
+    if settings.profile:
+        typer.echo(f"✅ 画像：{settings.profile}")
+    else:
+        typer.echo("⚠️  没有 MAIL_MONITOR_PROFILE：模型只知道你是「在读研究生，同时在找工作」")
 
     try:
         notifier = build_notifier(settings)
@@ -162,6 +168,38 @@ def stats() -> None:
     state = State(settings.resolved_db_path)
     for key, value in state.stats().items():
         typer.echo(f"{key}: {value}")
+
+
+@app.command()
+def senders(limit: int = typer.Option(30, help="最多显示几个")) -> None:
+    """看看记住了哪些发件人：是谁、来过几封、身份是怎么定的（你设定 / 规则设定 / 模型判断）。"""
+    settings = _settings()
+    state = State(settings.resolved_db_path)
+    rows = state.list_senders(limit=limit)
+    if not rows:
+        typer.echo("还没有记住任何发件人（先跑一次 init 或 run）")
+        return
+    for row in rows:
+        if row["relation"]:
+            relation = f"{row['relation']}（{SOURCE_LABEL.get(row['relation_source'] or '', '来源不明')}）"
+        else:
+            relation = "身份未知"
+        name = row["name"] or ""
+        typer.echo(f"{row['email']}  {name + '  ' if name else ''}{relation}  {row['message_count']} 封，最近 {fmt_time(row['last_seen_at'], settings.timezone)}")
+    typer.echo("\n改身份：mail-monitor sender-set 邮箱 身份")
+
+
+@app.command("sender-set")
+def sender_set(
+    email: str = typer.Argument(..., help="发件人地址"),
+    relation: str = typer.Argument(..., help="这是谁，例如 导师、师兄、HR"),
+    note: str | None = typer.Option(None, help="备注，会一起给模型看"),
+) -> None:
+    """手动告诉它某个发件人是谁。你设的优先级最高，规则和模型都不会再改。"""
+    settings = _settings()
+    state = State(settings.resolved_db_path)
+    state.set_sender_relation(email, relation, source="user", notes=note)
+    typer.echo(f"已记住：{email.strip().lower()} = {relation}")
 
 
 @app.command("lark-chats")

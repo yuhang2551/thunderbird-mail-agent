@@ -100,3 +100,88 @@ rules:
     digest_count = await send_digest(settings, state=state, notifier=notifier)
     assert digest_count == 3
     assert "知道就行（1）" in notifier.sent[-1] and "已忽略：订阅/通知 2" in notifier.sent[-1]
+
+
+async def test_memory_feeds_the_next_run(settings, fake_command, tmp_path):
+    """第一次 run 记住发件人身份和判断，第二次 run 同一话题的回信和同一发件人的新邮件都能带着记忆去判断。"""
+    rules = RuleSet.from_yaml(
+        """
+rules:
+  - name: 导师
+    match: { from_email: prof@example.edu }
+    then: { category: 导师/课题组, who: 导师, needs_action: yes, urgency: high, llm: true }
+  - name: 验证码
+    match: { subject_regex: "(?i)verification code" }
+    then: { needs_action: no, notify: never }
+  - name: 订阅
+    match: { from_regex: ["(?i)newsletter", "(?i)notifications?@"] }
+    then: { category: 订阅/通知, needs_action: no, notify: digest }
+"""
+    )
+    prompts: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        user = json.loads(request.content)["messages"][1]["content"]
+        prompts.append(user)
+        if "主题：Re: DoAtlas-2 progress numbers" in user and "Attached are the numbers" in user:
+            verdict = {"who": "导师", "relation": "导师", "what": "确认收到数字，周五组会再讨论", "needs_action": "no", "confidence": 0.9}
+        elif "DoAtlas" in user:
+            verdict = {"who": "导师", "relation": "导师", "what": "要周五前交更新后的数字", "needs_action": "yes", "urgency": "high", "confidence": 0.9}
+        elif "Interview confirmed" in user:
+            verdict = {"who": "量化公司 HR", "relation": "HR/招聘方", "what": "面试确认在周二 10 点，附会议链接", "needs_action": "no", "confidence": 0.9}
+        elif "Interview" in user:
+            verdict = {"who": "量化公司 HR", "relation": "HR/招聘方", "what": "约下周二面试，明天前确认", "needs_action": "yes", "urgency": "high", "confidence": 0.9}
+        else:
+            verdict = {"who": "学校活动办公室", "relation": "学校行政", "what": "周四 4 点讲座", "needs_action": "no", "confidence": 0.4}  # 把握不够，不记身份
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(verdict, ensure_ascii=False)}}]})
+
+    settings = settings.model_copy(update={"llm_api_key": "test"})
+    classifier = LLMClassifier(LLMClient(api_key="k", base_url="https://api.deepseek.com", model="m", transport=httpx.MockTransport(handler)), timezone="Asia/Dubai")
+    state = State(":memory:")
+    notifier = ConsoleNotifier()
+
+    first = await run_once(settings, state=state, notifier=notifier, classifier=classifier, rules=rules)
+    assert first.new == 6 and first.by_llm == 3
+    assert first.relations == 2  # 导师（规则写的）+ HR（模型猜的）；活动办公室把握不够
+    assert state.sender("prof@example.edu")["relation_source"] == "rule"
+    assert state.sender("hr@quantfirm.example")["relation"] == "HR/招聘方" and state.sender("hr@quantfirm.example")["relation_source"] == "llm"
+    assert state.sender("events@example.edu")["relation"] is None
+    assert not any("记忆（" in p for p in prompts)  # 第一次什么都不知道
+
+    # 第二次巡检：同一话题来了回信，HR 又来了一封新主题
+    from pathlib import Path
+
+    fixture = json.loads(Path("tests/fixtures/mailbox.json").read_text(encoding="utf-8"))
+    fixture["messages"] += [
+        {
+            "id": "<prof-2@example.edu>", "threadId": 4242,
+            "folderPath": "imap://student%40example.edu@outlook.office365.com/INBOX",
+            "author": "Prof. Example <prof@example.edu>", "recipients": "student@example.edu", "ccList": "",
+            "subject": "Re: DoAtlas-2 progress numbers", "age_hours": 0.5,
+            "body": "Attached are the numbers I meant. Let's discuss at Friday's group meeting.",
+        },
+        {
+            "id": "<hr-2@quantfirm.example>",
+            "folderPath": "imap://student%40example.com@imap.gmail.com/INBOX",
+            "author": "Talent Team <hr@quantfirm.example>", "recipients": "student@example.com", "ccList": "",
+            "subject": "Interview confirmed - Tuesday 10:00", "age_hours": 0.2,
+            "body": "Your interview is confirmed for Tuesday 10:00. Meeting link below.",
+        },
+    ]
+    path = tmp_path / "round2.json"
+    path.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
+    settings2 = settings.model_copy(update={"mcp_command": fake_command + [str(path)]})
+    prompts.clear()
+
+    second = await run_once(settings2, state=state, notifier=notifier, classifier=classifier, rules=rules)
+    assert second.new == 2 and second.by_llm == 2 and second.relations == 0  # 身份没变，不重复记
+    prof_prompt = next(p for p in prompts if "prof-2" in p or "Attached are the numbers" in p)
+    assert "身份=导师（规则设定）；之前 1 封，其中 1 封需要处理" in prof_prompt
+    assert "同一话题之前的邮件：\n  · " in prof_prompt and "导师：要周五前交更新后的数字（需要处理）" in prof_prompt
+    hr_prompt = next(p for p in prompts if "Interview confirmed" in p)
+    assert "身份=HR/招聘方（模型判断）；之前 1 封，其中 1 封需要处理" in hr_prompt
+    assert "量化公司 HR：约下周二面试，明天前确认（需要处理）" in hr_prompt
+    assert "同一话题" not in hr_prompt  # 新主题，没有话题历史
+    # 规则仍然盖过模型：导师的回信即使模型说不用管，也按规则推紧急
+    prof_row = state.conn.execute("SELECT * FROM messages WHERE id = '<prof-2@example.edu>'").fetchone()
+    assert prof_row["needs_action"] == "yes" and prof_row["what"] == "确认收到数字，周五组会再讨论"

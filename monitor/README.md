@@ -7,9 +7,10 @@ launchd 每 5 分钟 ──► mail-monitor run
                         │ 1 通过 MCP 调 thunderbird-mcp：listFolders → getRecentMessages
                         │ 2 去重（SQLite 记住处理过的邮件）
                         │ 3 规则层（rules.yaml：验证码不推、订阅只汇总、导师一律紧急……）
-                        │ 4 规则没覆盖的：读正文 → 模型判断（固定 schema 的 JSON）
+                        │ 4 规则没覆盖的：读正文 + 取记忆（这个发件人是谁、同一话题之前说了什么）→ 模型判断（固定 schema 的 JSON）
                         │ 5 可选：给"需要处理"的打 Thunderbird 标签（默认关）
-                        └ 6 推送：要管 / 拿不准 → 即时；其余 → 早晚汇总（mail-monitor digest）
+                        │ 6 推送：要管 / 拿不准 → 即时；其余 → 早晚汇总（mail-monitor digest）
+                        └ 7 记录：判断结果和发件人身份写回 SQLite，下次当作记忆
 ```
 
 它**只读邮件，不发不删**。写邮箱的动作只有一个"打标签"，默认关闭。
@@ -29,9 +30,11 @@ cp rules.example.yaml ~/.mail-monitor/rules.yaml   # 按自己的情况改规则
 
 mail-monitor doctor      # 自检：连得上 Thunderbird 吗、有哪些收件箱、推送和模型配好没
 mail-monitor init        # 首次运行：把现有邮件登记为已见，不推送旧邮件
-mail-monitor run --dry-run   # 看看它会怎么判断，不记录、不推送
+mail-monitor run --dry-run   # 看看它会怎么判断，不记录、不推送（也不带记忆）
 mail-monitor run         # 正式巡检一次
 mail-monitor digest      # 把攒着的邮件合成一条汇总发出去
+mail-monitor senders     # 看看它记住了哪些发件人、身份是怎么定的
+mail-monitor sender-set prof@example.edu 导师   # 手动告诉它某人是谁（优先级最高）
 ```
 
 ## 配置
@@ -39,6 +42,7 @@ mail-monitor digest      # 把攒着的邮件合成一条汇总发出去
 | 项 | 环境变量 | 说明 |
 |---|---|---|
 | 模型 | `DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` | OpenAI 兼容接口，默认 DeepSeek。没有 key 也能跑：规则没覆盖的邮件一律按"拿不准"推送 |
+| 画像 | `MAIL_MONITOR_PROFILE` | 一句话介绍你自己（在读什么、找什么工作、导师是谁），写进提示词；不填时模型只知道"在读研究生，同时在找工作" |
 | 推送 | `MAIL_MONITOR_NOTIFY` = `console` / `lark_webhook` / `lark_app` | 群自定义机器人只要 `LARK_WEBHOOK_URL`（可选 `LARK_WEBHOOK_SECRET`）；应用机器人要 `LARK_APP_ID`、`LARK_APP_SECRET`、`LARK_RECEIVE_ID` |
 | 规则 | `MAIL_MONITOR_RULES`（默认 `~/.mail-monitor/rules.yaml`） | 见 [rules.example.yaml](rules.example.yaml) |
 | 账号 | `MAIL_MONITOR_ACCOUNTS` | 只看某些账号；默认全部收件箱 |
@@ -102,8 +106,10 @@ mail-monitor lark-chats --email 你的邮箱     # 顺便查 open_id（私聊推
 
 1. **规则先行**（不花钱、可预期）：`rules.yaml` 里按发件人、域名、主题写规则。命中就直接定性，或者只给提示再交给模型。
 2. **模型兜底**：规则没覆盖的邮件读全文，让模型输出固定 schema 的 JSON（谁、什么事、要不要管、紧急度、截止日期、建议、类别、置信度）。输出经过 Pydantic 校验：写歪的值会被纠正，猜出来的截止日期会被丢掉，坏掉的回答重试一次，再失败退回"拿不准"。
-3. **宁可多推不漏**：拿不准的一律即时推送。推送失败的转入汇总，不会丢。
-4. **邮件内容是不可信数据**：提示词里明确要求模型不执行邮件里的任何指令；程序不点链接、不发信、不删信。
+3. **带着记忆判断**：判断前先从 SQLite 里取两样东西喂给模型——这个发件人是谁（之前来过几封、几封需要处理、最近几封说了什么）和同一话题之前的邮件（同一文件夹里 thread id 相同，或去掉 Re:/Fwd: 后主题相同）。模型就能看出"这封是在催上次那件事"。
+4. **发件人身份会越用越准**：模型每次顺带判断发件人和你的关系（导师、HR/招聘方、学校行政……），把握够大（置信度 ≥ 0.6）就写进 `senders` 表；规则里写的 `who` 也会记下来；`mail-monitor sender-set` 可以手动改。三者优先级：你设的 > 规则 > 模型，低的改不了高的。`mail-monitor senders` 能看到每个身份是谁定的。
+5. **宁可多推不漏**：拿不准的一律即时推送。推送失败的转入汇总，不会丢。
+6. **邮件内容是不可信数据**：提示词里明确要求模型不执行邮件里的任何指令，记忆里的身份和正文矛盾时以正文为准；程序不点链接、不发信、不删信。
 
 ## 开发
 
