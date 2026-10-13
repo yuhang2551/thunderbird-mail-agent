@@ -9,3 +9,14 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Python（monitor/）
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
+monitor/.env
+*.db
+*.db-wal
+*.db-shm

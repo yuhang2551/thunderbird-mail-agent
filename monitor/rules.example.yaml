@@ -1,0 +1,57 @@
+# 规则：谁的邮件怎么处理。复制到 ~/.mail-monitor/rules.yaml 后按自己的情况改。
+# 按顺序匹配，第一条命中的生效；没命中的交给模型判断。
+#
+# match 可以写：from_email（完整地址）、from_domain（域名后缀）、from_regex（对整个发件人字段）、
+#               subject_contains、subject_regex、account（账号名或 id 的一部分）。多个条件要同时满足。
+# then 可以写：category、who（这是谁，推送时显示）、needs_action（yes / no / unsure）、urgency（high / normal / low）、
+#              notify（instant / digest / never）、llm（true = 仍让模型写摘要，但 then 里的字段覆盖模型）、note。
+# 注意 YAML 会把不加引号的 yes/no 读成布尔值，程序能认，但写成 "yes" 更清楚。
+
+rules:
+  # 导师：一律即时推送、标紧急，但摘要让模型写
+  - name: 导师
+    match:
+      from_email: ["advisor@example.edu"]
+    then:
+      category: 导师/课题组
+      who: 导师
+      needs_action: "yes"
+      urgency: high
+      notify: instant
+      llm: true
+
+  # 学校行政部门：让模型判断要不要管，但类别和身份固定
+  - name: 学校行政
+    match:
+      from_domain: [example.edu]
+      from_regex: ["(?i)registrar|finance|admission|hr@|it-?support|student-?affairs"]
+    then:
+      category: 学校行政
+      who: 学校行政部门
+      llm: true
+
+  # 求职网站和公司的邮件：模型判断，类别固定
+  - name: 求职
+    match:
+      subject_regex: ["(?i)interview|offer|application|assessment|coding test|笔试|面试|录用"]
+    then:
+      category: 求职/HR
+      llm: true
+
+  # 验证码：不推送，也不花模型调用
+  - name: 验证码和一次性密码
+    match:
+      subject_regex: ["(?i)verification code", "(?i)one[- ]time (pass)?code", "(?i)\\bOTP\\b", "验证码", "(?i)security code"]
+    then:
+      category: 账单/验证码
+      needs_action: "no"
+      notify: never
+
+  # 自动发送、订阅：进汇总，只给数量
+  - name: 自动发送和订阅
+    match:
+      from_regex: ["(?i)no-?reply", "(?i)do-?not-?reply", "(?i)newsletter", "(?i)notifications?@", "(?i)mailer-daemon", "(?i)digest@"]
+    then:
+      category: 订阅/通知
+      needs_action: "no"
+      notify: digest
