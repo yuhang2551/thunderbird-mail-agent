@@ -60,6 +60,28 @@ async def test_app_notifier_fetches_token_then_sends():
     assert paths.count("/open-apis/im/v1/messages") == 2
 
 
+async def test_app_notifier_lists_chats_and_looks_up_open_id():
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/tenant_access_token/internal"):
+            return httpx.Response(200, json={"code": 0, "tenant_access_token": "t-1", "expire": 7200})
+        if path == "/open-apis/im/v1/chats":
+            if request.url.params.get("page_token") == "p2":
+                return httpx.Response(200, json={"code": 0, "data": {"items": [{"chat_id": "oc_2", "name": "第二群"}], "has_more": False}})
+            return httpx.Response(200, json={"code": 0, "data": {"items": [{"chat_id": "oc_1", "name": "邮件雷达"}], "has_more": True, "page_token": "p2"}})
+        if path == "/open-apis/contact/v3/users/batch_get_id":
+            assert request.url.params["user_id_type"] == "open_id"
+            assert json.loads(request.content) == {"emails": ["me@example.com"]}
+            return httpx.Response(200, json={"code": 0, "data": {"user_list": [{"user_id": "ou_me", "email": "me@example.com"}]}})
+        raise AssertionError(path)
+
+    notifier = LarkAppNotifier(domain="https://open.larksuite.com", app_id="cli_x", app_secret="s", receive_id="", transport=httpx.MockTransport(handler))
+    assert await notifier.list_chats() == [{"chat_id": "oc_1", "name": "邮件雷达"}, {"chat_id": "oc_2", "name": "第二群"}]
+    assert await notifier.lookup_open_id("me@example.com") == "ou_me"
+    with pytest.raises(NotifyError, match="LARK_RECEIVE_ID"):
+        await notifier.send("x")
+
+
 def test_build_notifier_validates_config():
     assert build_notifier(Settings()).name == "console"
     with pytest.raises(NotifyError, match="LARK_WEBHOOK_URL"):

@@ -46,6 +46,30 @@ mail-monitor digest      # 把攒着的邮件合成一条汇总发出去
 
 完整列表见 [.env.example](.env.example)。秘密只放在 `~/.mail-monitor/.env`，不进仓库。
 
+### 推送接到飞书 / Lark
+
+两条路，选一条：
+
+**A. 群自定义机器人（最省事，但有的租户没开）**：电脑端 Lark 打开一个群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制 webhook。写进 `.env`：`MAIL_MONITOR_NOTIFY=lark_webhook`、`LARK_WEBHOOK_URL=…`、可选 `LARK_WEBHOOK_SECRET=…`（签名校验）。
+
+**B. 应用机器人（用开发者后台，可以直接私聊你）**：
+
+1. [open.larksuite.com](https://open.larksuite.com)（飞书用 open.feishu.cn）→ 开发者后台 → 创建企业自建应用，起个名字。已经有自己的应用（比如一个 bridge 机器人）的话直接复用，跳到第 3 步。
+2. 应用页 → 添加应用能力 → **机器人**。
+3. **权限管理**里开：`im:message:send_as_bot`（以应用身份发消息）、`im:chat:readonly`（查机器人所在的群）；想按邮箱查自己的 open_id 再加 `contact:user.id:readonly`。
+4. **版本管理与发布** → 创建版本 → 发布（自己的租户自己审批就行）。
+5. **凭证与基础信息**里复制 App ID 和 App Secret，写进 `.env`：`LARK_APP_ID=…`、`LARK_APP_SECRET=…`。
+6. 在 Lark 里建一个群（只有你自己也行），添加机器人 → 选这个应用。然后：
+
+```bash
+mail-monitor lark-chats                     # 列出机器人所在的群和 chat_id
+mail-monitor lark-chats --email 你的邮箱     # 顺便查 open_id（私聊推送用）
+```
+
+把结果写进 `.env`：`MAIL_MONITOR_NOTIFY=lark_app`、`LARK_RECEIVE_ID_TYPE=chat_id`（或 `open_id`）、`LARK_RECEIVE_ID=…`。
+
+最后 `mail-monitor notify-test` 发一条测试消息，手机上收到就通了。
+
 ## 推送长什么样
 
 即时（要管或拿不准）：

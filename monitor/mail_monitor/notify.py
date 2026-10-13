@@ -114,6 +114,8 @@ class LarkAppNotifier:
         return self._token
 
     async def send(self, text: str) -> None:
+        if not self.receive_id:
+            raise NotifyError("没有设置 LARK_RECEIVE_ID（用 mail-monitor lark-chats 查群 id，或 --email 查 open_id）")
         token = await self._tenant_token()
         try:
             response = await self._client.post(
@@ -129,6 +131,45 @@ class LarkAppNotifier:
         except httpx.HTTPError as exc:
             raise NotifyError(f"发送消息失败：{exc}") from exc
         _check_lark_response(response, "im/v1/messages")
+
+    async def list_chats(self) -> list[dict[str, Any]]:
+        """机器人所在的群（需要权限 im:chat:readonly）。把机器人拉进一个群以后用它拿 chat_id。"""
+        token = await self._tenant_token()
+        chats: list[dict[str, Any]] = []
+        page_token: str | None = None
+        while True:
+            params: dict[str, Any] = {"page_size": 100}
+            if page_token:
+                params["page_token"] = page_token
+            try:
+                response = await self._client.get(
+                    "/open-apis/im/v1/chats", params=params, headers={"Authorization": f"Bearer {token}"}
+                )
+            except httpx.HTTPError as exc:
+                raise NotifyError(f"获取群列表失败：{exc}") from exc
+            data = _check_lark_response(response, "im/v1/chats").get("data", {})
+            chats.extend({"chat_id": item.get("chat_id"), "name": item.get("name")} for item in data.get("items", []))
+            page_token = data.get("page_token") if data.get("has_more") else None
+            if not page_token:
+                return chats
+
+    async def lookup_open_id(self, email: str) -> str | None:
+        """按邮箱查 open_id（需要权限 contact:user.id:readonly）。查不到返回 None。"""
+        token = await self._tenant_token()
+        try:
+            response = await self._client.post(
+                "/open-apis/contact/v3/users/batch_get_id",
+                params={"user_id_type": "open_id"},
+                headers={"Authorization": f"Bearer {token}"},
+                json={"emails": [email]},
+            )
+        except httpx.HTTPError as exc:
+            raise NotifyError(f"查 open_id 失败：{exc}") from exc
+        data = _check_lark_response(response, "contact/v3/users/batch_get_id").get("data", {})
+        for item in data.get("user_list", []):
+            if item.get("user_id"):
+                return item["user_id"]
+        return None
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -160,11 +201,18 @@ def build_notifier(settings: Any) -> Notifier:
         missing = [k for k in ("lark_app_id", "lark_app_secret", "lark_receive_id") if not getattr(settings, k)]
         if missing:
             raise NotifyError("MAIL_MONITOR_NOTIFY=lark_app 还缺：" + ", ".join(m.upper() for m in missing))
-        return LarkAppNotifier(
-            domain=settings.lark_domain,
-            app_id=settings.lark_app_id,
-            app_secret=settings.lark_app_secret,
-            receive_id=settings.lark_receive_id,
-            receive_id_type=settings.lark_receive_id_type,
-        )
+        return build_lark_app(settings)
     raise NotifyError(f"不认识的推送后端：{backend}")
+
+
+def build_lark_app(settings: Any) -> LarkAppNotifier:
+    """只要 app_id / app_secret 就能建，receive_id 可以后补（lark-chats 查 id 时用）。"""
+    if not (settings.lark_app_id and settings.lark_app_secret):
+        raise NotifyError("需要 LARK_APP_ID 和 LARK_APP_SECRET（开发者后台 → 应用 → 凭证与基础信息）")
+    return LarkAppNotifier(
+        domain=settings.lark_domain,
+        app_id=settings.lark_app_id,
+        app_secret=settings.lark_app_secret,
+        receive_id=settings.lark_receive_id or "",
+        receive_id_type=settings.lark_receive_id_type,
+    )

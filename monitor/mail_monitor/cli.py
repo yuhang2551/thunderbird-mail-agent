@@ -164,5 +164,60 @@ def stats() -> None:
         typer.echo(f"{key}: {value}")
 
 
+@app.command("lark-chats")
+def lark_chats(email: str | None = typer.Option(None, help="顺便按这个邮箱查你的 open_id（需要 contact:user.id:readonly 权限）")) -> None:
+    """用应用机器人的凭证列出它所在的群，拿到 chat_id 填进 LARK_RECEIVE_ID。"""
+    from .notify import build_lark_app
+
+    settings = _settings()
+
+    async def go() -> None:
+        notifier = build_lark_app(settings)
+        try:
+            chats = await notifier.list_chats()
+            if not chats:
+                typer.echo("机器人还没有加入任何群。在 Lark 里建一个群，把这个应用的机器人加进去，再运行一次。")
+            for chat in chats:
+                typer.echo(f"群：{chat['name'] or '（未命名）'}  chat_id={chat['chat_id']}")
+            if chats:
+                typer.echo("\n写进 ~/.mail-monitor/.env：\nMAIL_MONITOR_NOTIFY=lark_app\nLARK_RECEIVE_ID_TYPE=chat_id\nLARK_RECEIVE_ID=<上面的 chat_id>")
+            if email:
+                open_id = await notifier.lookup_open_id(email)
+                if open_id:
+                    typer.echo(f"\n{email} 的 open_id={open_id}（想私聊推送就用 LARK_RECEIVE_ID_TYPE=open_id）")
+                else:
+                    typer.echo(f"\n没查到 {email} 对应的用户（检查邮箱是不是这个租户里的，以及权限有没有开）")
+        finally:
+            await notifier.aclose()
+
+    try:
+        asyncio.run(go())
+    except NotifyError as exc:
+        typer.echo(f"❌ {exc}")
+        raise typer.Exit(code=1)
+
+
+@app.command("notify-test")
+def notify_test(text: str = typer.Argument("邮箱监控 Agent 测试消息 ✅", help="要发的内容")) -> None:
+    """用当前配置的推送后端发一条测试消息。"""
+    settings = _settings()
+
+    async def go() -> None:
+        notifier = build_notifier(settings)
+        try:
+            await notifier.send(text)
+        finally:
+            close = getattr(notifier, "aclose", None)
+            if close:
+                await close()
+
+    try:
+        asyncio.run(go())
+        typer.echo(f"✅ 已通过 {settings.notify_backend} 发送")
+    except NotifyError as exc:
+        typer.echo(f"❌ {exc}")
+        raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
