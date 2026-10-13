@@ -120,3 +120,29 @@ def test_sender_and_thread_history():
     assert [r["id"] for r in state.thread_history(forwarded)] == ["t1"]  # 换了文件夹，按归一化主题找到
     assert state.thread_history(h("x1", "INBOX", 9, "Unrelated")) == []  # 自己不算
     assert state.sender_counts("nobody@example.com") == (0, 0)
+
+
+def test_labels_and_evaluation():
+    state = State(":memory:")
+    # 模型说要管、你也说要管；模型说不用、你说要管（漏推）；规则说不用、你说不用；模型拿不准、你说不用（噪声）
+    state.record(header("e1"), Decision(needs_action="yes", decided_by="llm"), notify_mode="instant", pushed=True)
+    state.record(header("e2"), Decision(needs_action="no", decided_by="llm"), notify_mode="digest", pushed=False)
+    state.record(header("e3"), Decision(needs_action="no", decided_by="rule", rule_name="订阅"), notify_mode="digest", pushed=False)
+    state.record(header("e4"), Decision(needs_action="unsure", decided_by="fallback"), notify_mode="instant", pushed=True)
+    state.mark_seen([header("init-1")])
+    assert [r["id"] for r in state.recent_decisions(limit=10)] and "init-1" not in [r["id"] for r in state.recent_decisions(limit=10)]
+
+    assert state.set_label("e1", "yes") and state.set_label("e2", "yes") and state.set_label("e3", "no") and state.set_label("e4", "no")
+    assert not state.set_label("nope", "no")
+    import pytest
+
+    with pytest.raises(ValueError):
+        state.set_label("e1", "maybe")
+    assert state.recent_decisions(limit=10) == [] and len(state.recent_decisions(limit=10, unlabeled_only=False)) == 4
+
+    e = state.evaluation()
+    assert e["labeled"] == 4 and e["actual_yes"] == 2 and e["pushed"] == 2
+    assert e["caught"] == 1 and e["missed"] == 1  # e2 漏推
+    assert e["pushed_yes"] == 1 and e["noise"] == 1  # e4 噪声
+    assert e["strict_tp"] == 1 and e["predicted_yes"] == 1 and e["unsure"] == 1
+    assert e["by_source"] == {"llm": {"n": 2, "correct": 1, "unsure": 0}, "rule": {"n": 1, "correct": 1, "unsure": 0}, "fallback": {"n": 1, "correct": 0, "unsure": 1}}

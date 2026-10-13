@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS messages (
   notify_mode TEXT,
   pushed_at TEXT,
   digest_pending INTEGER NOT NULL DEFAULT 0,
-  digested_at TEXT
+  digested_at TEXT,
+  label TEXT,
+  labeled_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS senders (
@@ -67,7 +69,7 @@ CREATE TABLE IF NOT EXISTS runs (
 
 # 旧版本数据库缺的列：打开时补上，数据不丢
 MIGRATIONS: dict[str, dict[str, str]] = {
-    "messages": {"subject_key": "TEXT"},
+    "messages": {"subject_key": "TEXT", "label": "TEXT", "labeled_at": "TEXT"},
     "senders": {"relation_source": "TEXT", "relation_updated_at": "TEXT"},
 }
 
@@ -175,6 +177,55 @@ class State:
             "UPDATE messages SET digest_pending = 0, digested_at = ? WHERE id = ?", [(now, mid) for mid in ids]
         )
         self.conn.commit()
+
+    # ---- 评测：你标的答案 ----
+
+    def recent_decisions(self, *, limit: int = 20, unlabeled_only: bool = True) -> list[sqlite3.Row]:
+        """最近判断过的邮件（不含首次登记的），新的在前。"""
+        where = "decided_by != 'init'" + (" AND label IS NULL" if unlabeled_only else "")
+        return self.conn.execute(
+            f"SELECT * FROM messages WHERE {where} ORDER BY received_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+
+    def set_label(self, message_id: str, label: str) -> bool:
+        """记下你对一封邮件的答案：yes = 需要处理，no = 不需要。"""
+        if label not in ("yes", "no"):
+            raise ValueError("label 只能是 yes 或 no")
+        cur = self.conn.execute(
+            "UPDATE messages SET label = ?, labeled_at = ? WHERE id = ?", (label, utcnow(), message_id)
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def evaluation(self) -> dict[str, Any]:
+        """拿标过的邮件算：需要处理的有没有漏推、即时推送里有多少噪声、各来源判对多少。"""
+        rows = self.conn.execute(
+            "SELECT needs_action, notify_mode, decided_by, label FROM messages WHERE label IS NOT NULL"
+        ).fetchall()
+        actual_yes = [r for r in rows if r["label"] == "yes"]
+        pushed = [r for r in rows if r["notify_mode"] == "instant"]
+        predicted_yes = [r for r in rows if r["needs_action"] == "yes"]
+        by_source: dict[str, dict[str, int]] = {}
+        for r in rows:
+            source = by_source.setdefault(r["decided_by"] or "?", {"n": 0, "correct": 0, "unsure": 0})
+            source["n"] += 1
+            if r["needs_action"] == "unsure":
+                source["unsure"] += 1
+            elif (r["needs_action"] == "yes") == (r["label"] == "yes"):
+                source["correct"] += 1
+        return {
+            "labeled": len(rows),
+            "actual_yes": len(actual_yes),
+            "pushed": len(pushed),
+            "caught": sum(1 for r in actual_yes if r["notify_mode"] == "instant"),  # 需要处理且被即时推送
+            "missed": sum(1 for r in actual_yes if r["notify_mode"] != "instant"),  # 需要处理但没即时推送（漏推）
+            "pushed_yes": sum(1 for r in pushed if r["label"] == "yes"),
+            "noise": sum(1 for r in pushed if r["label"] == "no"),  # 即时推送了但其实不用管
+            "strict_tp": sum(1 for r in predicted_yes if r["label"] == "yes"),
+            "predicted_yes": len(predicted_yes),
+            "unsure": sum(1 for r in rows if r["needs_action"] == "unsure"),
+            "by_source": by_source,
+        }
 
     # ---- 记忆：历史邮件 ----
 

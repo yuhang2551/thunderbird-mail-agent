@@ -1,4 +1,4 @@
-"""命令行入口：mail-monitor doctor | init | run | digest | rules | stats | senders | sender-set | lark-chats | notify-test"""
+"""命令行入口：mail-monitor doctor | init | run | digest | rules | stats | senders | sender-set | review | eval | lark-chats | notify-test"""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +14,7 @@ from .mailbox import Mailbox, MailboxError
 from .models import MessageHeader
 from .memory import SOURCE_LABEL
 from .notify import NotifyError, build_notifier
-from .render import fmt_time
+from .render import LABEL, fmt_time
 from .rules import RuleSet
 from .state import State
 
@@ -200,6 +200,66 @@ def sender_set(
     state = State(settings.resolved_db_path)
     state.set_sender_relation(email, relation, source="user", notes=note)
     typer.echo(f"已记住：{email.strip().lower()} = {relation}")
+
+
+def _pct(part: int, whole: int) -> str:
+    return f"{part / whole:.0%}" if whole else "—"
+
+
+@app.command()
+def review(
+    limit: int = typer.Option(20, help="最多核对几封"),
+    all_: bool = typer.Option(False, "--all", help="已经标过的也再看一遍"),
+) -> None:
+    """逐条核对最近的判断：这封到底要不要管？你的答案存下来，mail-monitor eval 用它算准确率。"""
+    settings = _settings()
+    state = State(settings.resolved_db_path)
+    rows = state.recent_decisions(limit=limit, unlabeled_only=not all_)
+    if not rows:
+        typer.echo("没有待核对的邮件（先跑几次 run，或加 --all 重看标过的）")
+        return
+    typer.echo("每封回答：y = 需要处理，n = 不需要，s = 跳过，q = 退出\n")
+    labeled = 0
+    for row in rows:
+        verdict = LABEL.get(row["needs_action"], row["needs_action"] or "?")
+        source = row["decided_by"] + (f"·{row['rule_name']}" if row["rule_name"] else "")
+        who = row["who"] or row["sender_name"] or row["sender_email"] or "未知发件人"
+        typer.echo(f"[{verdict} · {source}] {who}：{row['what'] or row['subject'] or '（无主题）'}")
+        stamp = fmt_time(row["received_at"], settings.timezone)
+        previous = f" | 你标过：{LABEL.get(row['label'], row['label'])}" if row["label"] else ""
+        typer.echo(f"   主题：{row['subject'] or '（无主题）'} | {row['account'] or ''} {stamp}{previous}")
+        answer = typer.prompt("   要管吗？[y/n/s/q]", default="s", show_default=False).strip().lower()
+        if answer in ("q", "quit", "退出"):
+            break
+        if answer in ("y", "yes", "是", "要"):
+            state.set_label(row["id"], "yes")
+            labeled += 1
+        elif answer in ("n", "no", "否", "不要"):
+            state.set_label(row["id"], "no")
+            labeled += 1
+    typer.echo(f"\n已标注 {labeled} 封。看结果：mail-monitor eval")
+
+
+@app.command("eval")
+def evaluate() -> None:
+    """用你在 review 里标的答案算准确率：需要处理的漏了几封、即时推送里有多少是噪声。"""
+    settings = _settings()
+    state = State(settings.resolved_db_path)
+    e = state.evaluation()
+    if not e["labeled"]:
+        typer.echo("还没有标注数据，先跑 mail-monitor review")
+        return
+    typer.echo(f"已标注 {e['labeled']} 封，其中你认为需要处理的 {e['actual_yes']} 封")
+    typer.echo(f"需要处理的召回：{e['caught']}/{e['actual_yes']}（{_pct(e['caught'], e['actual_yes'])}）被即时推送；漏推 {e['missed']} 封")
+    typer.echo(f"即时推送的精确：{e['pushed_yes']}/{e['pushed']}（{_pct(e['pushed_yes'], e['pushed'])}）真的需要处理；噪声 {e['noise']} 封")
+    typer.echo(
+        f"严格口径（只算 needs_action=yes）：精确 {_pct(e['strict_tp'], e['predicted_yes'])}，"
+        f"召回 {_pct(e['strict_tp'], e['actual_yes'])}；拿不准 {e['unsure']} 封"
+    )
+    typer.echo("按来源：")
+    for source, stat in e["by_source"].items():
+        decided = stat["n"] - stat["unsure"]
+        typer.echo(f"  {source}：{stat['n']} 封，判对 {stat['correct']}/{decided}（{_pct(stat['correct'], decided)}），拿不准 {stat['unsure']}")
 
 
 @app.command("lark-chats")

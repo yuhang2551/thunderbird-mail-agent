@@ -7,7 +7,7 @@ name = "mail-monitor"
 version = "0.1.0"
 description = "邮箱监控 Agent：通过 Thunderbird 的 MCP 工具盯着所有邮箱，判断新邮件要不要管，推送到飞书 / Lark。"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
   "mcp>=2,<3",

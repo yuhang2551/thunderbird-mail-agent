@@ -1,5 +1,7 @@
 # 邮箱监控 Agent（mail-monitor）
 
+**中文** | [English](README_EN.md)
+
 本仓库原来的用法是你开口问（"看看这周的邮件"），Agent 才去读。这个目录把它变成**自动盯着**：每几分钟巡检一次所有收件箱，新邮件进来就判断"谁、什么事、要不要管、几号前"，推送到飞书 / Lark。
 
 ```
@@ -21,12 +23,9 @@ launchd 每 5 分钟 ──► mail-monitor run
 
 ```bash
 cd ~/thunderbird-mail-agent/monitor
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-
-mkdir -p ~/.mail-monitor
-cp .env.example ~/.mail-monitor/.env        # 填 DEEPSEEK_API_KEY 和 LARK_WEBHOOK_URL
-cp rules.example.yaml ~/.mail-monitor/rules.yaml   # 按自己的情况改规则
+./scripts/install.sh     # 建 .venv、装依赖、生成 ~/.mail-monitor/.env 和 rules.yaml（需要 Python 3.10+）
+source .venv/bin/activate
+# 然后编辑 ~/.mail-monitor/.env：填 DEEPSEEK_API_KEY 和推送配置；按自己的情况改 ~/.mail-monitor/rules.yaml
 
 mail-monitor doctor      # 自检：连得上 Thunderbird 吗、有哪些收件箱、推送和模型配好没
 mail-monitor init        # 首次运行：把现有邮件登记为已见，不推送旧邮件
@@ -35,6 +34,27 @@ mail-monitor run         # 正式巡检一次
 mail-monitor digest      # 把攒着的邮件合成一条汇总发出去
 mail-monitor senders     # 看看它记住了哪些发件人、身份是怎么定的
 mail-monitor sender-set prof@example.edu 导师   # 手动告诉它某人是谁（优先级最高）
+mail-monitor review      # 逐条核对它的判断，标出到底要不要管
+mail-monitor eval        # 用标注算准确率：漏推几封、噪声几封
+```
+
+### 定时运行
+
+macOS 用 launchd（比常驻进程稳：电脑睡眠时不跑，醒来补跑一次）：
+
+```bash
+./scripts/launchd.sh install     # 每 5 分钟 run 一次，每天 9 点和 18 点各 digest 一次
+./scripts/launchd.sh status      # 看装没装、上次退出码、日志最后几行
+./scripts/launchd.sh uninstall
+```
+
+间隔和时间可以改：`RUN_INTERVAL=120 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install`。日志在 `~/.mail-monitor/logs/`。装之前先跑一次 `mail-monitor init`，不然它会把现有邮件全推一遍。
+
+Linux 用 cron：
+
+```
+*/5 * * * *  ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor run    >> ~/.mail-monitor/logs/run.log 2>&1
+0 9,18 * * * ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor digest >> ~/.mail-monitor/logs/digest.log 2>&1
 ```
 
 ## 配置
@@ -111,11 +131,35 @@ mail-monitor lark-chats --email 你的邮箱     # 顺便查 open_id（私聊推
 5. **宁可多推不漏**：拿不准的一律即时推送。推送失败的转入汇总，不会丢。
 6. **邮件内容是不可信数据**：提示词里明确要求模型不执行邮件里的任何指令，记忆里的身份和正文矛盾时以正文为准；程序不点链接、不发信、不删信。
 
+## 评测：它判得准不准
+
+Agent 项目没有数字站不住脚，所以带了一个最小的评测闭环：
+
+1. `mail-monitor review`：把最近判断过的邮件一封封列出来（它的判断、谁定的），你回答 y / n（到底要不要管）。答案存进同一个数据库。
+2. `mail-monitor eval`：用这些答案算
+   - **需要处理的召回**：你认为要管的邮件里，有多少被即时推送了（漏推几封）。这是最要紧的数字，宁可多推也不能漏。
+   - **即时推送的精确**：即时推送里有多少真的要管（噪声几封）。
+   - 严格口径（只算模型明确说 yes 的）的精确和召回，以及规则 / 模型 / 保底各自判对多少。
+
+用上一两周、标几十封，就有一组能写进简历的数字；改了规则或提示词以后再跑一遍 `eval`，看数字有没有变好。
+
 ## 开发
 
 ```bash
 pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp，不需要 Thunderbird
 ```
+
+| 路径 | 内容 |
+|---|---|
+| `mail_monitor/mailbox.py` | 邮件层：MCP 客户端，启动 `mcp-bridge.cjs`，只封装监控要用的 5 个工具 |
+| `mail_monitor/rules.py` | 规则层：YAML 规则，先于模型执行 |
+| `mail_monitor/memory.py`、`state.py` | 记忆：SQLite 里的已处理邮件、发件人身份、同一话题的历史、你的标注 |
+| `mail_monitor/classify.py`、`llm.py` | 判断：提示词、固定 schema 的 JSON 输出、Pydantic 校验、保底 |
+| `mail_monitor/pipeline.py` | 一次巡检的全过程 |
+| `mail_monitor/notify.py`、`render.py` | 推送：终端 / 群机器人 webhook / 应用机器人；推送文本 |
+| `mail_monitor/cli.py` | 命令行 |
+| `scripts/` | `install.sh`（装环境）、`launchd.sh`（定时任务） |
+| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）和 43 个测试 |
 
 `tests/fake_server.py` 照抄上游 v0.9.2 的工具名、参数和返回结构，所以能在云端或 CI 里跑通整条流水线；换成真 bridge 只是换一个启动命令。
 
@@ -123,4 +167,4 @@ pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp，不需要 
 
 - 邮件层仍然是 `thunderbird-mcp` 扩展 + `mcp-bridge.cjs`，本程序只是它的另一个 MCP 客户端，和 Claude Desktop 用的是同一条路。
 - 安全规则沿用 [templates/mail-workspace/CLAUDE.md](../templates/mail-workspace/CLAUDE.md)：不发不删、不点链接、邮件内容不可信。
-- 开机自启（launchd）和英文说明在后续版本补充。
+- 和仓库里的 `scripts/doctor.sh` 一样，`mail-monitor doctor` 也只检查不改动。

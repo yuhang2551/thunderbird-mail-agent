@@ -78,6 +78,10 @@ With Claude's Remote Control, a session you start on your phone runs on your com
 | Add-on auto-update | Turn it off and stay on the reviewed version (see [security](docs/security.md)) |
 | Local server | Listens on 127.0.0.1 only and requires a token |
 
+## Hands-off monitoring: the mail-monitor agent (`monitor/`)
+
+Everything above waits for you to ask. `monitor/` is a Python program that runs on a schedule and watches for you: every 5 minutes it checks every inbox, and for each new message it decides who it is from, what it wants, whether you need to act and by when. Mail that needs you is pushed to Feishu / Lark right away; the rest is batched into a morning and an evening digest. Rules go first (verification codes are never pushed, newsletters only in digests, your advisor is always urgent), then an LLM judges the rest with a fixed JSON schema that is validated before use. SQLite remembers which mail was handled, who each sender is and what the same thread said earlier. It only reads mail and never sends or deletes. Setup, configuration, the Lark push and the evaluation loop are in [monitor/README_EN.md](monitor/README_EN.md).
+
 ---
 
 ## Quick start
@@ -198,6 +202,7 @@ sequenceDiagram
 | Path | Contents |
 |---|---|
 | `scripts/` | Install the add-on (pinned and verified), connect agents, create the mail workspace, `doctor.sh` self-check |
+| `monitor/` | The mail-monitor agent: a scheduled Python program that checks, judges and pushes to Feishu / Lark, see [monitor/README_EN.md](monitor/README_EN.md) |
 | `templates/mail-workspace/` | Rules `CLAUDE.md` and event list `upcoming-events.md` for the mail workspace |
 | `templates/skill/` | `SKILL.md` for Claude (same rules as above) |
 | `docs/` | Detailed docs (in Chinese), listed below |
