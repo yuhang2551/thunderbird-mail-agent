@@ -1,3 +1,7 @@
+import shlex
+import sys
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from mail_monitor.cli import app
@@ -52,3 +56,17 @@ def test_review_then_eval(tmp_path, monkeypatch):
     assert "llm：1 封，判对 1/1（100%）" in result.output
 
     assert "没有待核对的邮件" in runner.invoke(app, ["review"]).output  # 都标过了
+
+
+def test_doctor_and_init_explain_a_closed_thunderbird(tmp_path, monkeypatch):
+    dead = shlex.join([sys.executable, str(Path(__file__).parent / "dead_bridge.py")])
+    env = tmp_path / ".env"
+    env.write_text(f"MAIL_MONITOR_HOME={tmp_path}\nMAIL_MONITOR_MCP_COMMAND={dead}\n", encoding="utf-8")
+    monkeypatch.setenv("MAIL_MONITOR_ENV", str(env))
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 1 and "连不上 Thunderbird" in result.output, result.output
+
+    result = runner.invoke(app, ["init"])
+    assert result.exit_code == 1 and "连不上 Thunderbird" in result.output, result.output

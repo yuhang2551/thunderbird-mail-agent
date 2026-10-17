@@ -1,6 +1,11 @@
+import sys
+from pathlib import Path
+
 import pytest
 
 from mail_monitor.mailbox import Mailbox, MailboxError
+
+DEAD_BRIDGE = [sys.executable, str(Path(__file__).parent / "dead_bridge.py")]
 
 
 async def test_list_inboxes_and_recent(fake_command):
@@ -50,3 +55,18 @@ async def test_tool_error_becomes_mailbox_error(fake_command):
     async with Mailbox(fake_command) as mailbox:
         with pytest.raises(MailboxError, match="getMessages"):
             await mailbox.call("getMessages", messages=[])
+
+
+async def test_thunderbird_not_running_is_a_mailbox_error():
+    # bridge 握手成功，但每个请求都回 JSON-RPC 错误：要变成 MailboxError，而不是让 run 崩掉
+    async with Mailbox(DEAD_BRIDGE) as mailbox:
+        with pytest.raises(MailboxError, match="Connection discovery failed"):
+            await mailbox.list_tools()
+        with pytest.raises(MailboxError, match="listAccounts"):
+            await mailbox.list_inboxes()
+
+
+async def test_missing_node_is_a_mailbox_error(tmp_path):
+    with pytest.raises(MailboxError, match="启动邮件层失败"):
+        async with Mailbox([str(tmp_path / "no-such-node"), "bridge.cjs"]):
+            pass

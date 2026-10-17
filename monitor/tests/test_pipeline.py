@@ -1,4 +1,6 @@
 import json
+import sys
+from pathlib import Path
 
 import httpx
 
@@ -149,8 +151,6 @@ rules:
     assert not any("记忆（" in p for p in prompts)  # 第一次什么都不知道
 
     # 第二次巡检：同一话题来了回信，HR 又来了一封新主题
-    from pathlib import Path
-
     fixture = json.loads(Path("tests/fixtures/mailbox.json").read_text(encoding="utf-8"))
     fixture["messages"] += [
         {
@@ -185,3 +185,10 @@ rules:
     # 规则仍然盖过模型：导师的回信即使模型说不用管，也按规则推紧急
     prof_row = state.conn.execute("SELECT * FROM messages WHERE id = '<prof-2@example.edu>'").fetchone()
     assert prof_row["needs_action"] == "yes" and prof_row["what"] == "确认收到数字，周五组会再讨论"
+
+
+async def test_run_reports_error_when_thunderbird_is_closed(settings):
+    dead = settings.model_copy(update={"mcp_command": [sys.executable, str(Path(__file__).parent / "dead_bridge.py")]})
+    report = await run_once(dead, notifier=ConsoleNotifier())
+    assert report.fetched == 0 and report.pushed == 0
+    assert any("连不上 Thunderbird" in error for error in report.errors)

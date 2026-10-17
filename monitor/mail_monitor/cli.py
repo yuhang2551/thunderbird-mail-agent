@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ from pathlib import Path
 import typer
 
 from . import __version__
-from .config import Settings, load_settings
+from .config import RETIRED_MODELS, Settings, load_settings
 from .mailbox import Mailbox, MailboxError
 from .models import MessageHeader
 from .memory import SOURCE_LABEL
@@ -82,6 +83,11 @@ def doctor() -> None:
 
     if settings.llm_enabled:
         typer.echo(f"✅ 模型：{settings.llm_model} @ {settings.llm_base_url}")
+        if settings.llm_model in RETIRED_MODELS and "deepseek.com" in settings.llm_base_url:
+            ok = False
+            typer.echo(f"❌ DeepSeek 已经停用 {settings.llm_model} 这个模型名，改成 LLM_MODEL={RETIRED_MODELS[settings.llm_model]}")
+        if settings.resolved_llm_extra_body:
+            typer.echo(f"   请求里额外带上：{json.dumps(settings.resolved_llm_extra_body, ensure_ascii=False)}")
     else:
         typer.echo("⚠️  没有 LLM key（DEEPSEEK_API_KEY）：规则没覆盖的邮件会按「拿不准」全部推送")
     if settings.profile:
@@ -106,7 +112,11 @@ def init(days: int = typer.Option(7, help="把最近几天的邮件登记为已�
     from .pipeline import init_seen
 
     settings = _settings()
-    report = asyncio.run(init_seen(settings, days_back=days))
+    try:
+        report = asyncio.run(init_seen(settings, days_back=days))
+    except MailboxError as exc:
+        typer.echo(f"❌ 连不上 Thunderbird：{exc}")
+        raise typer.Exit(code=1)
     typer.echo(f"已登记 {report.new} 封（收件箱 {report.inboxes} 个，共 {report.fetched} 封）")
     for error in report.errors:
         typer.echo(f"⚠️  {error}")

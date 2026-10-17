@@ -1,6 +1,6 @@
 """LLM 调用：OpenAI 兼容的 chat/completions 接口（默认 DeepSeek），只用 JSON 模式。
 
-故意不引入厂商 SDK：一个 POST 就够，换模型只改 base_url 和 model。
+故意不引入厂商 SDK：一个 POST 就够，换模型只改 base_url 和 model。各家的私有参数（比如 DeepSeek 的思考开关）走 extra_body。
 """
 from __future__ import annotations
 
@@ -45,8 +45,10 @@ class LLMClient:
         model: str,
         timeout: float = 60.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        extra_body: dict[str, Any] | None = None,
     ):
         self.model = model
+        self.extra_body = dict(extra_body or {})
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout,
@@ -66,6 +68,7 @@ class LLMClient:
             "response_format": {"type": "json_object"},
             "temperature": temperature,
             "max_tokens": max_tokens,
+            **self.extra_body,
         }
         try:
             response = await self._client.post("/chat/completions", json=payload)

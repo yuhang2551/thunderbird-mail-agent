@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from mail_monitor.classify import LLMClassifier
+from mail_monitor.config import load_settings
 from mail_monitor.llm import LLMClient, LLMError, parse_json_object
 from mail_monitor.models import MessageHeader
 
@@ -18,8 +19,10 @@ def test_parse_json_object_tolerates_fences_and_prose():
         parse_json_object("[1, 2]")
 
 
-def _client(handler) -> LLMClient:
-    return LLMClient(api_key="k", base_url="https://api.deepseek.com", model="deepseek-chat", transport=httpx.MockTransport(handler))
+def _client(handler, **kwargs) -> LLMClient:
+    return LLMClient(
+        api_key="k", base_url="https://api.deepseek.com", model="deepseek-flash", transport=httpx.MockTransport(handler), **kwargs
+    )
 
 
 async def test_chat_json_posts_openai_compatible_payload():
@@ -27,10 +30,45 @@ async def test_chat_json_posts_openai_compatible_payload():
         assert request.url.path == "/chat/completions"
         assert request.headers["Authorization"] == "Bearer k"
         payload = json.loads(request.content)
-        assert payload["response_format"] == {"type": "json_object"} and payload["model"] == "deepseek-chat"
+        assert payload["response_format"] == {"type": "json_object"} and payload["model"] == "deepseek-flash"
+        assert "thinking" not in payload
         return httpx.Response(200, json={"choices": [{"message": {"content": '{"needs_action": "yes"}'}}]})
 
     assert await _client(handler).chat_json("sys", "user") == {"needs_action": "yes"}
+
+
+async def test_chat_json_merges_extra_body():
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert payload["thinking"] == {"type": "disabled"} and payload["max_tokens"] == 800
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"needs_action": "no"}'}}]})
+
+    client = _client(handler, extra_body={"thinking": {"type": "disabled"}})
+    assert await client.chat_json("sys", "user") == {"needs_action": "no"}
+
+
+def test_settings_turn_off_deepseek_thinking_unless_overridden(tmp_path, monkeypatch):
+    for name in ("LLM_BASE_URL", "LLM_MODEL", "LLM_EXTRA_BODY"):
+        monkeypatch.delenv(name, raising=False)
+    missing = tmp_path / "missing.env"
+
+    settings = load_settings(missing)
+    assert settings.llm_model == "deepseek-flash"
+    assert settings.resolved_llm_extra_body == {"thinking": {"type": "disabled"}}
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.openai.com/v1")
+    assert load_settings(missing).resolved_llm_extra_body == {}
+
+    monkeypatch.setenv("LLM_EXTRA_BODY", '{"enable_thinking": false}')
+    assert load_settings(missing).resolved_llm_extra_body == {"enable_thinking": False}
+
+    monkeypatch.delenv("LLM_BASE_URL")
+    monkeypatch.setenv("LLM_EXTRA_BODY", "{}")
+    assert load_settings(missing).resolved_llm_extra_body == {}  # 显式写 {} 就什么都不加
+
+    monkeypatch.setenv("LLM_EXTRA_BODY", "[1]")
+    with pytest.raises(ValueError, match="LLM_EXTRA_BODY"):
+        load_settings(missing)
 
 
 async def test_chat_json_http_error():

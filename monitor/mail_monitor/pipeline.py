@@ -54,7 +54,12 @@ class RunReport:
 
 def make_classifier(settings: Settings) -> Classifier:
     if settings.llm_enabled:
-        client = LLMClient(api_key=settings.llm_api_key or "", base_url=settings.llm_base_url, model=settings.llm_model)
+        client = LLMClient(
+            api_key=settings.llm_api_key or "",
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            extra_body=settings.resolved_llm_extra_body,
+        )
         return LLMClassifier(client, timezone=settings.timezone, body_chars=settings.llm_body_chars, profile=settings.profile)
     log.warning("没有配置 LLM key，所有规则没覆盖的邮件都会按「拿不准」推送")
     return FallbackClassifier()

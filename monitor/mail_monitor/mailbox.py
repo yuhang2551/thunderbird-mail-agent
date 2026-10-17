@@ -2,6 +2,7 @@
 
 只封装监控需要的几个工具：listAccounts、listFolders、getRecentMessages、getMessages、updateMessage。
 每个工具的返回都是一段 JSON 文本，这里解析成模型；返回 {"error": ...} 时抛 MailboxError。
+Thunderbird 没开时 bridge 照样能握手，但之后每个请求都回 JSON-RPC 错误（MCPError），这里也统一转成 MailboxError。
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from typing import Any
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
+from mcp.shared.exceptions import MCPError
 
 from .models import Folder, MessageBody, MessageHeader
 
@@ -46,6 +48,9 @@ class Mailbox:
             read, write = await self._stack.enter_async_context(stdio_client(params))
             self.session = await self._stack.enter_async_context(ClientSession(read, write))
             await self.session.initialize()
+        except (OSError, MCPError) as exc:  # OSError：比如找不到 node 或 bridge
+            await self._stack.aclose()
+            raise MailboxError(f"启动邮件层失败（{' '.join(self.command)}）：{exc}") from exc
         except BaseException:
             await self._stack.aclose()
             raise
@@ -60,13 +65,19 @@ class Mailbox:
 
     async def list_tools(self) -> list[str]:
         assert self.session
-        result = await self.session.list_tools()
+        try:
+            result = await self.session.list_tools()
+        except MCPError as exc:
+            raise MailboxError(f"listTools: {exc}") from exc
         return [tool.name for tool in result.tools]
 
     async def call(self, name: str, **arguments: Any) -> Any:
         assert self.session, "Mailbox 还没进入 async with"
         args = {k: v for k, v in arguments.items() if v is not None}
-        result = await self.session.call_tool(name, args, read_timeout_seconds=self.call_timeout)
+        try:
+            result = await self.session.call_tool(name, args, read_timeout_seconds=self.call_timeout)
+        except MCPError as exc:
+            raise MailboxError(f"{name}: {exc}") from exc
         content = getattr(result, "content", None) or []
         text = next((block.text for block in content if getattr(block, "type", "") == "text"), None)
         if getattr(result, "isError", False) or getattr(result, "is_error", False):

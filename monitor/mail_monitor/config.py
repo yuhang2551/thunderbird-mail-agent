@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import shlex
 from pathlib import Path
@@ -34,8 +35,10 @@ class Settings(BaseModel):
     # LLM（OpenAI 兼容接口，默认 DeepSeek）
     llm_api_key: str | None = None
     llm_base_url: str = "https://api.deepseek.com"
-    llm_model: str = "deepseek-chat"
+    llm_model: str = "deepseek-flash"  # deepseek-chat / deepseek-reasoner 已于 2026-07-24 停用
     llm_body_chars: int = 4000  # 正文送给模型前截断到这么多字符
+    # 原样并进请求体的额外字段（JSON 对象），用来传各家的私有参数；不填时见 resolved_llm_extra_body
+    llm_extra_body: dict[str, Any] | None = None
     # 一句话介绍收件人（在读什么、找什么工作、导师是谁），写进提示词，模型判断"谁、要不要管"更准
     profile: str | None = None
 
@@ -72,6 +75,19 @@ class Settings(BaseModel):
     def llm_enabled(self) -> bool:
         return bool(self.llm_api_key)
 
+    @property
+    def resolved_llm_extra_body(self) -> dict[str, Any]:
+        if self.llm_extra_body is not None:
+            return self.llm_extra_body
+        # DeepSeek 现在默认开思考模式。分诊用不着：关掉更快、更省，max_tokens 也不会被思考过程用掉
+        if "deepseek.com" in self.llm_base_url:
+            return {"thinking": {"type": "disabled"}}
+        return {}
+
+
+# DeepSeek 2026-07-24 停用的旧模型名 → 现在该用的
+RETIRED_MODELS = {"deepseek-chat": "deepseek-flash", "deepseek-reasoner": "deepseek-flash"}
+
 
 # 环境变量名 → Settings 字段名
 ENV_MAP: dict[str, str] = {
@@ -90,6 +106,7 @@ ENV_MAP: dict[str, str] = {
     "LLM_BASE_URL": "llm_base_url",
     "LLM_MODEL": "llm_model",
     "LLM_BODY_CHARS": "llm_body_chars",
+    "LLM_EXTRA_BODY": "llm_extra_body",
     "MAIL_MONITOR_PROFILE": "profile",
     "MAIL_MONITOR_NOTIFY": "notify_backend",
     "LARK_DOMAIN": "lark_domain",
@@ -107,6 +124,7 @@ _LIST_FIELDS = {"accounts"}
 _COMMAND_FIELDS = {"mcp_command"}
 _BOOL_FIELDS = {"action_tag"}
 _PATH_FIELDS = {"bridge_path", "home", "db_path", "rules_path"}
+_JSON_FIELDS = {"llm_extra_body"}
 
 
 def _coerce(field: str, raw: str) -> Any:
@@ -121,6 +139,14 @@ def _coerce(field: str, raw: str) -> Any:
         return value.lower() in ("1", "true", "yes", "on")
     if field in _PATH_FIELDS:
         return Path(value).expanduser()
+    if field in _JSON_FIELDS:
+        try:
+            data = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"不是合法的 JSON：{exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError('要写成 JSON 对象，例如 {"thinking": {"type": "disabled"}}')
+        return data
     return value
 
 
@@ -135,7 +161,10 @@ def load_settings(env_file: Path | None = None, overrides: dict[str, Any] | None
     values: dict[str, Any] = {}
     for env_name, field in ENV_MAP.items():
         if env_name in merged and merged[env_name] is not None:
-            coerced = _coerce(field, merged[env_name])
+            try:
+                coerced = _coerce(field, merged[env_name])
+            except ValueError as exc:
+                raise ValueError(f"配置 {env_name} 有问题：{exc}") from exc
             if coerced is not None:
                 values[field] = coerced
     if overrides:
