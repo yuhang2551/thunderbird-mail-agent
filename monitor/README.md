@@ -17,6 +17,14 @@ launchd 每 5 分钟 ──► mail-monitor run
 
 它**只读邮件，不发不删**。写邮箱的动作只有一个"打标签"，默认关闭。
 
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [架构说明](docs/architecture.md) | 由哪几块组成、一次巡检的全过程、判断链路、记忆、设计取舍、数据去向、安全边界 |
+| [模型后端](docs/model-backends.md) | API key 版（现在能用）和 ChatGPT / Claude 订阅版（设计已定，代码还没写）：两家的规则、费用、数据去向 |
+| [常见问题和排错](docs/faq.md) | 装不上、连不上、收不到推送、推得太多或太少 |
+
 ## 安装
 
 前提：README 里的第 1–3 步已经做完（Thunderbird 登录好邮箱、装好 thunderbird-mcp 扩展、Node 可用）。
@@ -25,7 +33,7 @@ launchd 每 5 分钟 ──► mail-monitor run
 cd ~/thunderbird-mail-agent/monitor
 ./scripts/install.sh     # 建 .venv、装依赖、生成 ~/.mail-monitor/.env 和 rules.yaml（需要 Python 3.10+）
 source .venv/bin/activate
-# 然后编辑 ~/.mail-monitor/.env：填 DEEPSEEK_API_KEY 和推送配置；按自己的情况改 ~/.mail-monitor/rules.yaml
+# 然后编辑 ~/.mail-monitor/.env：填 DEEPSEEK_API_KEY（不填也能跑），推送先保持 console；按自己的情况改 ~/.mail-monitor/rules.yaml
 
 mail-monitor doctor      # 自检：连得上 Thunderbird 吗、有哪些收件箱、推送和模型配好没
 mail-monitor init        # 首次运行：把现有邮件登记为已见，不推送旧邮件
@@ -61,9 +69,9 @@ Linux 用 cron：
 
 | 项 | 环境变量 | 说明 |
 |---|---|---|
-| 模型 | `DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` | OpenAI 兼容接口，默认 DeepSeek。没有 key 也能跑：规则没覆盖的邮件一律按"拿不准"推送 |
+| 模型 | `DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_EXTRA_BODY` | OpenAI 兼容接口，默认 DeepSeek 的 `deepseek-flash`，并关掉它默认打开的思考模式。没有 key 也能跑：规则没覆盖的邮件一律按"拿不准"推送。用 ChatGPT / Claude 订阅代替 key 的版本见[模型后端](docs/model-backends.md) |
 | 画像 | `MAIL_MONITOR_PROFILE` | 一句话介绍你自己（在读什么、找什么工作、导师是谁），写进提示词；不填时模型只知道"在读研究生，同时在找工作" |
-| 推送 | `MAIL_MONITOR_NOTIFY` = `console` / `lark_webhook` / `lark_app` | 群自定义机器人只要 `LARK_WEBHOOK_URL`（可选 `LARK_WEBHOOK_SECRET`）；应用机器人要 `LARK_APP_ID`、`LARK_APP_SECRET`、`LARK_RECEIVE_ID` |
+| 推送 | `MAIL_MONITOR_NOTIFY` = `console` / `lark_app` / `lark_webhook` | 先用 `console` 在终端里看效果。应用机器人要 `LARK_APP_ID`、`LARK_APP_SECRET`、`LARK_RECEIVE_ID`；群自定义机器人只要 `LARK_WEBHOOK_URL`（可选 `LARK_WEBHOOK_SECRET`） |
 | 规则 | `MAIL_MONITOR_RULES`（默认 `~/.mail-monitor/rules.yaml`） | 见 [rules.example.yaml](rules.example.yaml) |
 | 账号 | `MAIL_MONITOR_ACCOUNTS` | 只看某些账号；默认全部收件箱 |
 | 行动 | `MAIL_MONITOR_ACTION_TAG` | 给"需要处理"的邮件打标签，默认 `false` |
@@ -131,6 +139,16 @@ mail-monitor lark-chats --email 你的邮箱     # 顺便查 open_id（私聊推
 5. **宁可多推不漏**：拿不准的一律即时推送。推送失败的转入汇总，不会丢。
 6. **邮件内容是不可信数据**：提示词里明确要求模型不执行邮件里的任何指令，记忆里的身份和正文矛盾时以正文为准；程序不点链接、不发信、不删信。
 
+每一步为什么这样设计、出错时会怎样，见[架构说明](docs/architecture.md)。
+
+## 数据去哪了
+
+- 规则没定性的邮件（发件人、主题、时间、正文前 4000 字、相关记忆）会发给你配置的模型；验证码、订阅这类规则直接定性的不发。
+- 推送到 Lark 的只有一句话摘要，不含正文。
+- 判断记录存在本机的 `~/.mail-monitor/state.db`，不存正文；秘密只在 `~/.mail-monitor/.env`。
+
+各个模型后端分别发给谁、怎么让某个邮箱完全不经过模型，见[模型后端](docs/model-backends.md#数据去哪了)。
+
 ## 评测：它判得准不准
 
 Agent 项目没有数字站不住脚，所以带了一个最小的评测闭环：
@@ -159,7 +177,8 @@ pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp，不需要 
 | `mail_monitor/notify.py`、`render.py` | 推送：终端 / 群机器人 webhook / 应用机器人；推送文本 |
 | `mail_monitor/cli.py` | 命令行 |
 | `scripts/` | `install.sh`（装环境）、`launchd.sh`（定时任务） |
-| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）和 43 个测试 |
+| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）、Thunderbird 没开时的 bridge（`dead_bridge.py`）和 49 个测试 |
+| `docs/` | 架构说明、模型后端、常见问题 |
 
 `tests/fake_server.py` 照抄上游 v0.9.2 的工具名、参数和返回结构，所以能在云端或 CI 里跑通整条流水线；换成真 bridge 只是换一个启动命令。
 

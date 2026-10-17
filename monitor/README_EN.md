@@ -17,6 +17,14 @@ launchd every 5 min ──► mail-monitor run
 
 It **only reads mail; it never sends or deletes**. The one action that writes to the mailbox (tagging) is off by default.
 
+## Docs
+
+| Doc | Contents |
+|---|---|
+| [Architecture](docs/architecture_EN.md) | The parts, one check from start to finish, how a verdict is made, memory, design choices, where data goes, safety boundaries |
+| [Model backends](docs/model-backends_EN.md) | The API-key version (works today) and the ChatGPT / Claude subscription version (designed, not yet built): each vendor's rules, cost and data handling |
+| [FAQ and troubleshooting](docs/faq_EN.md) | Install problems, no connection, no push, too many or too few pushes |
+
 ## Install
 
 Prerequisites: steps 1–3 of the main README are done (Thunderbird signed in to your mailboxes, the thunderbird-mcp add-on installed, Node available).
@@ -25,7 +33,7 @@ Prerequisites: steps 1–3 of the main README are done (Thunderbird signed in to
 cd ~/thunderbird-mail-agent/monitor
 ./scripts/install.sh     # creates .venv, installs dependencies, writes ~/.mail-monitor/.env and rules.yaml (needs Python 3.10+)
 source .venv/bin/activate
-# then edit ~/.mail-monitor/.env (DEEPSEEK_API_KEY and the push settings) and adjust ~/.mail-monitor/rules.yaml
+# then edit ~/.mail-monitor/.env (DEEPSEEK_API_KEY, optional; keep push on console at first) and adjust ~/.mail-monitor/rules.yaml
 
 mail-monitor doctor      # self-check: can it reach Thunderbird, which inboxes, are push and model configured. Changes nothing
 mail-monitor init        # first run: register existing mail as seen so old mail is not pushed
@@ -61,9 +69,9 @@ On Linux use cron:
 
 | Item | Environment variable | Notes |
 |---|---|---|
-| Model | `DEEPSEEK_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` | Any OpenAI-compatible endpoint, DeepSeek by default. Works without a key: mail the rules do not settle is pushed as "unsure" |
+| Model | `DEEPSEEK_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_EXTRA_BODY` | Any OpenAI-compatible endpoint; by default DeepSeek's `deepseek-flash`, with its default thinking mode turned off. Works without a key: mail the rules do not settle is pushed as "unsure". For using a ChatGPT / Claude subscription instead of a key, see [Model backends](docs/model-backends_EN.md) |
 | Profile | `MAIL_MONITOR_PROFILE` | One sentence about you (what you study, what job you are looking for, who your advisor is), added to the prompt. Without it the model only knows "a graduate student who is also job hunting" |
-| Push | `MAIL_MONITOR_NOTIFY` = `console` / `lark_webhook` / `lark_app` | A group custom bot only needs `LARK_WEBHOOK_URL` (optional `LARK_WEBHOOK_SECRET`); an app bot needs `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_RECEIVE_ID` |
+| Push | `MAIL_MONITOR_NOTIFY` = `console` / `lark_app` / `lark_webhook` | Start with `console` to watch it in the terminal. An app bot needs `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_RECEIVE_ID`; a group custom bot only needs `LARK_WEBHOOK_URL` (optional `LARK_WEBHOOK_SECRET`) |
 | Rules | `MAIL_MONITOR_RULES` (default `~/.mail-monitor/rules.yaml`) | See [rules.example.yaml](rules.example.yaml) |
 | Accounts | `MAIL_MONITOR_ACCOUNTS` | Watch only some accounts; default is every inbox |
 | Actions | `MAIL_MONITOR_ACTION_TAG` | Tag "needs action" mail in Thunderbird, default `false` |
@@ -131,6 +139,16 @@ Digest (morning and evening):
 5. **Better one push too many than one missed**: anything unsure is pushed right away. A failed push is moved into the digest, so nothing is lost.
 6. **Mail content is untrusted data**: the prompt tells the model never to follow instructions found in mail, and the body wins when it contradicts the remembered identity; the program never opens links, sends or deletes.
 
+Why each step is designed this way, and what happens when something fails, is in [Architecture](docs/architecture_EN.md).
+
+## Where your data goes
+
+- Mail the rules do not settle (sender, subject, time, the first 4,000 characters of the body, related memory) goes to the model you configured; mail a rule settles outright, such as verification codes and newsletters, does not.
+- A push to Lark carries only the one-line summary, never the body.
+- Verdicts are stored locally in `~/.mail-monitor/state.db`, without bodies; secrets live only in `~/.mail-monitor/.env`.
+
+Who each model backend sends data to, and how to keep one mailbox away from the model entirely, is in [Model backends](docs/model-backends_EN.md#where-your-data-goes).
+
 ## Evaluation: how accurate is it
 
 An agent project without numbers does not hold up, so a minimal evaluation loop is built in:
@@ -159,7 +177,8 @@ pytest            # tests/fake_server.py stands in for thunderbird-mcp, so no Th
 | `mail_monitor/notify.py`, `render.py` | Push: console / group-bot webhook / app bot; message text |
 | `mail_monitor/cli.py` | Command line |
 | `scripts/` | `install.sh` (environment), `launchd.sh` (scheduling) |
-| `tests/` | The fake thunderbird-mcp (`fake_server.py`) and 43 tests |
+| `tests/` | The fake thunderbird-mcp (`fake_server.py`), a bridge whose Thunderbird is closed (`dead_bridge.py`) and 49 tests |
+| `docs/` | Architecture, model backends, FAQ |
 
 `tests/fake_server.py` copies the tool names, parameters and return shapes of upstream v0.9.2, so the whole pipeline runs in the cloud or in CI; switching to the real bridge is only a different start command.
 
