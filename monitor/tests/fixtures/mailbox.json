@@ -1,0 +1,95 @@
+{
+  "accounts": [
+    {
+      "id": "account1",
+      "name": "School",
+      "type": "imap",
+      "identities": [{"id": "id1", "email": "student@example.edu", "name": "Student", "isDefault": true}]
+    },
+    {
+      "id": "account2",
+      "name": "Gmail",
+      "type": "imap",
+      "identities": [{"id": "id2", "email": "student@example.com", "name": "Student", "isDefault": true}]
+    }
+  ],
+  "folders": [
+    {"name": "Inbox", "path": "imap://student%40example.edu@outlook.office365.com/INBOX", "type": "inbox", "accountId": "account1", "totalMessages": 4, "unreadMessages": 3, "depth": 0, "isFavorite": false},
+    {"name": "Sent", "path": "imap://student%40example.edu@outlook.office365.com/Sent", "type": "sent", "accountId": "account1", "totalMessages": 10, "unreadMessages": 0, "depth": 0, "isFavorite": false},
+    {"name": "Inbox", "path": "imap://student%40example.com@imap.gmail.com/INBOX", "type": "inbox", "accountId": "account2", "totalMessages": 4, "unreadMessages": 4, "depth": 0, "isFavorite": false},
+    {"name": "Drafts", "path": "imap://student%40example.com@imap.gmail.com/[Gmail]/Drafts", "type": "drafts", "accountId": "account2", "totalMessages": 0, "unreadMessages": 0, "depth": 1, "isFavorite": false}
+  ],
+  "messages": [
+    {
+      "id": "<prof-1@example.edu>",
+      "threadId": 4242,
+      "folderPath": "imap://student%40example.edu@outlook.office365.com/INBOX",
+      "author": "Prof. Example <prof@example.edu>",
+      "recipients": "student@example.edu",
+      "ccList": "",
+      "subject": "Re: DoAtlas-2 progress numbers",
+      "age_hours": 3,
+      "body": "Hi,\n\nThanks for the update. Could you send me the updated extraction numbers by Friday? We need them for the group meeting.\n\nBest,\nProf. Example"
+    },
+    {
+      "id": "<otp-1@accounts.example.com>",
+      "folderPath": "imap://student%40example.com@imap.gmail.com/INBOX",
+      "author": "no-reply@accounts.example.com",
+      "recipients": "student@example.com",
+      "ccList": "",
+      "subject": "Your verification code is 482913",
+      "age_hours": 5,
+      "body": "Your verification code is 482913. It expires in 10 minutes."
+    },
+    {
+      "id": "<seminar-1@example.edu>",
+      "folderPath": "imap://student%40example.edu@outlook.office365.com/INBOX",
+      "author": "Events Office <events@example.edu>",
+      "recipients": "all-students@example.edu",
+      "ccList": "",
+      "subject": "[Seminar] LLM agents in finance - Thursday 4pm, registration required",
+      "age_hours": 20,
+      "body": "Dear students,\n\nJoin us on Thursday at 4pm in Building 1, Room 2.14 for a talk on LLM agents in finance. Registration closes Wednesday noon. Refreshments provided.\n\nEvents Office"
+    },
+    {
+      "id": "<newsletter-1@arxiv-daily.example>",
+      "folderPath": "imap://student%40example.com@imap.gmail.com/INBOX",
+      "author": "ArXiv Daily <newsletter@arxiv-daily.example>",
+      "recipients": "student@example.com",
+      "ccList": "",
+      "subject": "Today's papers: agents, RAG, memory",
+      "age_hours": 30,
+      "body": "1. A survey of agent memory ... 2. Retrieval for long documents ..."
+    },
+    {
+      "id": "<hr-1@quantfirm.example>",
+      "folderPath": "imap://student%40example.com@imap.gmail.com/INBOX",
+      "author": "Talent Team <hr@quantfirm.example>",
+      "recipients": "student@example.com",
+      "ccList": "",
+      "subject": "Interview invitation - AI Agent Engineer",
+      "age_hours": 1,
+      "body": "Hello,\n\nWe would like to invite you to a first-round interview next Tuesday at 10:00 (online). Please confirm your availability by tomorrow.\n\nTalent Team"
+    },
+    {
+      "id": "<github-1@notifications.example>",
+      "folderPath": "imap://student%40example.com@imap.gmail.com/INBOX",
+      "author": "GitHub <notifications@github.example>",
+      "recipients": "student@example.com",
+      "ccList": "",
+      "subject": "[repo] PR #12: review requested",
+      "age_hours": 2,
+      "body": "Someone requested your review on PR #12."
+    },
+    {
+      "id": "<old-1@example.edu>",
+      "folderPath": "imap://student%40example.edu@outlook.office365.com/INBOX",
+      "author": "Registrar <registrar@example.edu>",
+      "recipients": "student@example.edu",
+      "ccList": "",
+      "subject": "Course registration closes next week",
+      "age_hours": 100,
+      "body": "Reminder: course registration closes next Monday."
+    }
+  ]
+}
