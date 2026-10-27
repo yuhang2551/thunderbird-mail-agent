@@ -94,9 +94,9 @@ def test_build_notifier_validates_config():
 @pytest.mark.parametrize(
     ("receive_id", "expected"),
     [
-        ("oc_8fe5d3e4", "chat_id"),
-        ("ou_7d8a6e6d", "open_id"),
-        ("on_94a1ee5f", "union_id"),
+        ("oc_example", "chat_id"),
+        ("ou_example", "open_id"),
+        ("on_example", "union_id"),
         ("me@example.com", "email"),
         ("", "open_id"),
         (None, "open_id"),
