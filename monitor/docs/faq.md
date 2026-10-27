@@ -85,6 +85,17 @@ DeepSeek 在 2026-07-24 停用了 `deepseek-chat` 和 `deepseek-reasoner`。在 
 | HTTP 429 | 请求太快 |
 | 模型没有返回 JSON | 偶尔会有，重试一次通常就好；经常出现的话把日志贴出来 |
 
+**用 Claude 订阅版时，doctor 说运行不了 claude（No such file or directory）**
+
+终端里还没有 `claude` 命令。装 Claude Code 的命令行版，再登录：
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+~/.local/bin/claude auth login
+```
+
+PATH 里没有 `claude` 时，程序会自己去 `~/.local/bin/claude` 找；装在别处的话，把完整路径写进 `.env` 的 `MAIL_MONITOR_CLAUDE_BIN`。
+
 **用 Claude 订阅版时，doctor 说 claude 没登录、或者用的是 API key**
 
 在终端运行 `claude`，输入 `/login`，选用 Claude 账号（Pro / Max）登录，再跑一次 `mail-monitor doctor`。用 API key 登录会按量计费，不算订阅。

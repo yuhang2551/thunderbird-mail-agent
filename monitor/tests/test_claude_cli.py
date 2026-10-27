@@ -124,6 +124,8 @@ async def test_pipeline_with_the_claude_backend(settings, fake_claude, monkeypat
         ({"FAKE_CLAUDE_AUTH": "oauth_token"}, True, "长期令牌"),
         ({"FAKE_CLAUDE_AUTH": "logged_out"}, False, "/login"),
         ({"FAKE_CLAUDE_AUTH": "api_key"}, False, "按量计费"),
+        ({"FAKE_CLAUDE_AUTH": "api_key_helper"}, False, "按量计费"),
+        ({"FAKE_CLAUDE_AUTH": "third_party"}, False, "第三方云"),
         ({"FAKE_CLAUDE_VERSION": "2.1.200"}, False, "claude update"),
     ],
 )
@@ -138,7 +140,23 @@ def test_doctor_lines(fake_claude, monkeypatch, env, ok, expected):
 
 def test_doctor_without_claude_installed(tmp_path):
     ok, lines = doctor_lines(str(tmp_path / "no-such-claude"), "sonnet")
-    assert not ok and "运行不了" in lines[0]
+    assert not ok and "运行不了" in lines[0] and "claude.ai/install.sh" in lines[1]
+
+
+async def test_finds_claude_in_local_bin_when_not_on_path(fake_claude, tmp_path, monkeypatch):
+    claude_bin, log = fake_claude
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".local" / "bin" / "claude").symlink_to(claude_bin)  # 官方安装脚本的位置
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")  # 刚装完的终端窗口：PATH 里还没有 ~/.local/bin
+
+    client = ClaudeCLIClient(binary="claude", workdir=tmp_path / "w")
+    assert client.binary == str(home / ".local" / "bin" / "claude")
+    assert "needs_action" in await client.chat_json("s", "u")
+    assert len(_calls(log)) == 1
+    ok, lines = doctor_lines("claude", "sonnet")
+    assert ok, lines
 
 
 def test_doctor_command_reports_the_claude_backend(fake_claude, fake_command, tmp_path, monkeypatch):

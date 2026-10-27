@@ -85,6 +85,17 @@ That message never went through the model: either `.env` has neither a key nor t
 | HTTP 429 | Requests too fast |
 | The model returned no JSON | Happens occasionally and one retry usually fixes it; if it keeps happening, share the log |
 
+**With the Claude subscription version, doctor cannot run claude (No such file or directory)**
+
+There is no `claude` command in the terminal yet. Install the Claude Code command line, then sign in:
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+~/.local/bin/claude auth login
+```
+
+When `claude` is not on the PATH, the program looks for `~/.local/bin/claude` on its own; if it is installed somewhere else, put the full path in `MAIL_MONITOR_CLAUDE_BIN` in `.env`.
+
 **With the Claude subscription version, doctor says claude is not signed in, or is using an API key**
 
 Run `claude` in a terminal, type `/login`, sign in with your Claude account (Pro / Max), then run `mail-monitor doctor` again. An API-key sign-in is billed per token and does not count as the subscription.

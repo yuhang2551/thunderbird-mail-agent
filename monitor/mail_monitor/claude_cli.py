@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -38,6 +39,15 @@ class ClaudeCLIError(LLMError):
     def __init__(self, message: str, *, retryable: bool = True):
         super().__init__(message)
         self.retryable = retryable
+
+
+def resolve_binary(binary: str) -> str:
+    """PATH 里找不到 claude 时，退回官方安装脚本的位置 ~/.local/bin/claude（刚装完的终端窗口、launchd 里常见）。"""
+    if os.sep not in binary and shutil.which(binary) is None:
+        native = Path.home() / ".local" / "bin" / "claude"
+        if native.exists():
+            return str(native)
+    return binary
 
 
 def claude_env() -> dict[str, str]:
@@ -82,7 +92,7 @@ def _failure(message: str) -> ClaudeCLIError:
 
 class ClaudeCLIClient:
     def __init__(self, *, binary: str = "claude", model: str = "sonnet", timeout: float = 180.0, workdir: Path):
-        self.binary = binary
+        self.binary = resolve_binary(binary)
         self.model = model
         self.timeout = timeout
         self.workdir = workdir  # 一个固定的空目录：claude -p 会执行当前目录项目里的 hooks、连 .mcp.json 里的服务器
@@ -176,6 +186,7 @@ class ClaudeCLIClient:
 def doctor_lines(binary: str, model: str) -> tuple[bool, list[str]]:
     """给 mail-monitor doctor 用：查 claude 装没装、版本够不够、是不是用订阅登录的。不调用模型，不花额度。"""
     lines: list[str] = []
+    binary = resolve_binary(binary)
 
     def run(*args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run([binary, *args], capture_output=True, text=True, timeout=60, env=claude_env())
@@ -185,7 +196,8 @@ def doctor_lines(binary: str, model: str) -> tuple[bool, list[str]]:
     except (OSError, subprocess.TimeoutExpired) as exc:
         return False, [
             f"❌ 模型：Claude 订阅版，但运行不了 {binary}（{exc}）",
-            "   先装好 Claude Code 并登录；装好后 which claude 能看到路径，launchd 下找不到时把完整路径写进 MAIL_MONITOR_CLAUDE_BIN",
+            "   先装 Claude Code 命令行版：curl -fsSL https://claude.ai/install.sh | bash，再运行 ~/.local/bin/claude auth login 用 Claude 账号登录",
+            "   装在别处的话，把 claude 的完整路径写进 MAIL_MONITOR_CLAUDE_BIN",
         ]
     ok = True
     version = parse_version(version_out.stdout)
@@ -203,17 +215,18 @@ def doctor_lines(binary: str, model: str) -> tuple[bool, list[str]]:
     method, provider = status.get("authMethod"), status.get("apiProvider", "firstParty")
     if not status:
         lines.append("⚠️  看不出 claude 的登录状态：在终端运行 claude，确认已经用 Claude 账号登录")
-    elif not status.get("loggedIn"):
+    elif not status.get("loggedIn", method not in (None, "none")):
         ok = False
         lines.append("❌ claude 还没登录：在终端运行 claude，输入 /login，用你的 Claude 账号（Pro / Max）登录")
-    elif provider != "firstParty":
+    elif method == "third_party" or provider != "firstParty":
         ok = False
-        lines.append(f"❌ claude 配置成了第三方云（{provider}），不走 Claude 订阅")
+        where = provider if provider != "firstParty" else "Bedrock、Vertex 之类"
+        lines.append(f"❌ claude 配置成了第三方云（{where}），不走 Claude 订阅")
     elif method == "claude.ai":
         lines.append(f"✅ claude 已用 Claude 账号登录（{status.get('subscriptionType') or '订阅'}），用量算在订阅里")
     elif method == "oauth_token":
         lines.append("✅ claude 用长期令牌登录（claude setup-token），用量算在订阅里")
-    elif method in ("api_key", "apiKeyHelper"):
+    elif method in ("api_key", "api_key_helper", "apiKeyHelper"):
         ok = False
         lines.append("❌ claude 现在用 API key 登录，会按量计费，不是订阅：运行 claude，输入 /login 改用 Claude 账号登录")
     else:

@@ -3,7 +3,7 @@
 只模仿后端用到的三种调用：claude --version、claude auth status、claude -p … --output-format json。
 行为由环境变量控制：
 - FAKE_CLAUDE_MODE：ok（默认）| fenced | not_logged_in | usage_limit | garbage | unknown_option | slow
-- FAKE_CLAUDE_AUTH：claude.ai（默认）| oauth_token | api_key | logged_out
+- FAKE_CLAUDE_AUTH：claude.ai（默认）| oauth_token | api_key | api_key_helper | third_party | logged_out
 - FAKE_CLAUDE_VERSION：默认 2.1.311
 - FAKE_CLAUDE_LOG：每次 -p 调用追加一行 JSON（参数、工作目录、标准输入、提示词文件、有没有带 API key），给测试检查
 """

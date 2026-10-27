@@ -177,7 +177,7 @@ pytest            # tests/fake_server.py stands in for thunderbird-mcp and fake_
 | `mail_monitor/notify.py`, `render.py` | Push: console / group-bot webhook / app bot; message text |
 | `mail_monitor/cli.py` | Command line |
 | `scripts/` | `install.sh` (environment), `launchd.sh` (scheduling) |
-| `tests/` | The fake thunderbird-mcp (`fake_server.py`), a bridge whose Thunderbird is closed (`dead_bridge.py`), a fake `claude` command (`fake_claude.py`) and 76 tests |
+| `tests/` | The fake thunderbird-mcp (`fake_server.py`), a bridge whose Thunderbird is closed (`dead_bridge.py`), a fake `claude` command (`fake_claude.py`) and 79 tests |
 | `docs/` | Architecture, model backends, FAQ |
 
 `tests/fake_server.py` copies the tool names, parameters and return shapes of upstream v0.9.2, so the whole pipeline runs in the cloud or in CI; switching to the real bridge is only a different start command.

@@ -83,7 +83,7 @@ One thing to test while building it: the docs for this route do not say whether 
 
 **Turning it on**:
 
-1. Install Claude Code on the Mac (v2.1.259 or later; run `claude update` if it is older), run `claude` once in a terminal, type `/login`, and sign in with your Claude account (Pro / Max).
+1. Install the Claude Code command line on the Mac (v2.1.259 or later): `curl -fsSL https://claude.ai/install.sh | bash` puts it at `~/.local/bin/claude` without an admin password; if it is installed but older, run `claude update`. Then run `claude auth login` and sign in with your Claude account (Pro / Max) in the browser.
 2. Put `MAIL_MONITOR_LLM=claude` in `~/.mail-monitor/.env`. No key is needed.
 3. `mail-monitor doctor` checks the claude version and how it is signed in, without calling the model or using any allowance; then `mail-monitor run --dry-run` makes real verdicts once.
 

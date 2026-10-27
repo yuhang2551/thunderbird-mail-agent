@@ -83,7 +83,7 @@ ChatGPT Plus / Pro、Claude Pro / Max 这些订阅本身不带 API，是给两�
 
 **怎么开**：
 
-1. Mac 上装好 Claude Code（v2.1.259 以上，旧了就运行 `claude update`），在终端运行一次 `claude`，输入 `/login`，用你的 Claude 账号（Pro / Max）登录。
+1. Mac 上装好 Claude Code 的命令行版（v2.1.259 以上）：`curl -fsSL https://claude.ai/install.sh | bash`，装到 `~/.local/bin/claude`，不要管理员密码；装过但版本旧了就运行 `claude update`。然后运行 `claude auth login`，在浏览器里用你的 Claude 账号（Pro / Max）登录。
 2. 在 `~/.mail-monitor/.env` 里写 `MAIL_MONITOR_LLM=claude`，不用填任何 key。
 3. `mail-monitor doctor` 检查 claude 的版本和登录方式，不调用模型、不花额度；再用 `mail-monitor run --dry-run` 真判断一次看看。
 
