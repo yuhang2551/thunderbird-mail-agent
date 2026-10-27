@@ -46,11 +46,14 @@ async def test_init_marks_existing_mail_as_seen(settings):
     assert after.new == 0 and notifier.sent == []
 
 
-async def test_dry_run_does_not_touch_state(settings):
+async def test_dry_run_does_not_touch_state(settings, capsys):
     report = await run_once(settings, dry_run=True)
     assert report.new == 6
     # 数据库没建在 home 下
     assert not settings.resolved_db_path.exists()
+    # 即时推送的之外，会进汇总的也打出来
+    out = capsys.readouterr().out
+    assert "Interview invitation" in out and "📮 邮件汇总" in out and "已忽略：订阅/通知 2" in out
 
 
 async def test_llm_path_with_rule_overrides_and_tagging(settings, tmp_path):

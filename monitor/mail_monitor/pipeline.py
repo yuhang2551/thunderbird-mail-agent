@@ -149,6 +149,9 @@ async def run_once(
             decided.sort(key=lambda item: item[0].date or datetime.min.replace(tzinfo=timezone.utc))
             for header, decision, rule in decided:
                 await _settle(header, decision, rule, settings, state, mailbox, notifier, report)
+            if dry_run:
+                # 试跑时把会进早晚汇总的也打出来，不然只看得到即时推送的那几封
+                await send_digest(settings, notifier=notifier, state=state)
     except MailboxError as exc:
         report.errors.append(f"连不上 Thunderbird：{exc}")
     finally:
