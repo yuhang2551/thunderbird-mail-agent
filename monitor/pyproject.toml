@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mail-monitor"
+version = "0.1.0"
+description = "邮箱监控 Agent：通过 Thunderbird 的 MCP 工具盯着所有邮箱，判断新邮件要不要管，推送到飞书 / Lark。"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+  "mcp>=2,<3",
+  "pydantic>=2.5",
+  "httpx>=0.27",
+  "pyyaml>=6",
+  "python-dotenv>=1",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+mail-monitor = "mail_monitor.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["mail_monitor*"]
+
+[tool.setuptools.package-data]
+mail_monitor = ["*.yaml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

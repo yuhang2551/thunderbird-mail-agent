@@ -78,6 +78,10 @@ Agent 先在对话里给你看回复全文，你确认后才**存进邮箱的草
 | 扩展自动更新 | 建议关闭，锁定在审查过的版本（见[安全说明](docs/security.md)） |
 | 本地服务 | 只监听本机 127.0.0.1，需要令牌才能访问 |
 
+## 自动盯邮箱：监控 Agent（`monitor/`）
+
+上面的功能都要你开口问。`monitor/` 是一个可以定时跑的 Python 程序，让 Agent 自己盯着：每 5 分钟巡检所有收件箱，新邮件进来就判断"谁、什么事、要不要管、几号前"，要管的即时推到飞书 / Lark，其余攒成早晚汇总。规则先过滤（验证码不推、订阅只汇总、导师一律紧急），模型再判断（固定结构的 JSON，经过校验），SQLite 记住处理过的邮件、每个发件人是谁、同一话题之前说了什么。它只读邮件，不发不删。安装、配置、接飞书和评测方法见 [monitor/README.md](monitor/README.md)。
+
 ---
 
 ## 快速开始
@@ -198,6 +202,7 @@ sequenceDiagram
 | 路径 | 内容 |
 |---|---|
 | `scripts/` | 安装扩展（锁定版本并校验）、接入各 Agent、生成邮件工作文件夹、自检 `doctor.sh` |
+| `monitor/` | 邮箱监控 Agent：定时巡检、判断、推送到飞书 / Lark 的 Python 程序，见 [monitor/README.md](monitor/README.md) |
 | `templates/mail-workspace/` | 邮件工作文件夹的规则 `CLAUDE.md` 和活动清单 `upcoming-events.md` |
 | `templates/skill/` | 给 Claude 用的技能 `SKILL.md`（和上面的规则内容一致） |
 | `docs/` | 详细文档，见下表 |
