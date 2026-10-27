@@ -51,7 +51,7 @@ PYTHON="$(~/.local/bin/uv python find 3.13)" ./scripts/install.sh
 **手机上没收到**
 
 - 先跑 `mail-monitor notify-test`，看它报什么错。
-- 应用机器人：权限开了没有（`im:message:send_as_bot`），版本发布了没有，机器人在不在那个群里，`LARK_RECEIVE_ID_TYPE` 和 `LARK_RECEIVE_ID` 对不对得上（`chat_id` 配群 id，`open_id` 配你的用户 id）。
+- 应用机器人：权限开了没有（`im:message:send_as_bot`），版本发布了没有，机器人在不在那个群里，`LARK_RECEIVE_ID` 对不对（`oc_` 开头是群，`ou_` 开头是你本人）；另外写了 `LARK_RECEIVE_ID_TYPE` 的话，要和 id 对得上（`chat_id` 配群 id，`open_id` 配你的用户 id），不确定就删掉这一行让程序自己判断。
 - 群自定义机器人：群里开了签名校验的话，`LARK_WEBHOOK_SECRET` 要填。
 - 飞书国内版要把 `LARK_DOMAIN` 改成 `https://open.feishu.cn`。
 - 推送失败的邮件不会丢，会转进下一次汇总。

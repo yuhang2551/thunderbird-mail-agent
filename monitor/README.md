@@ -99,7 +99,7 @@ mail-monitor lark-chats                     # 列出机器人所在的群和 cha
 mail-monitor lark-chats --email 你的邮箱     # 顺便查 open_id（私聊推送用）
 ```
 
-把结果写进 `.env`：`MAIL_MONITOR_NOTIFY=lark_app`、`LARK_RECEIVE_ID_TYPE=chat_id`（或 `open_id`）、`LARK_RECEIVE_ID=…`。
+把结果写进 `.env`：`MAIL_MONITOR_NOTIFY=lark_app`、`LARK_RECEIVE_ID=…`。`oc_` 开头的群 id 会自动按群发，`ou_` 开头的 open_id 按私聊发，`LARK_RECEIVE_ID_TYPE` 不用填。
 
 最后 `mail-monitor notify-test` 发一条测试消息，手机上收到就通了。
 
@@ -178,7 +178,7 @@ pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp、fake_claud
 | `mail_monitor/notify.py`、`render.py` | 推送：终端 / 群机器人 webhook / 应用机器人；推送文本 |
 | `mail_monitor/cli.py` | 命令行 |
 | `scripts/` | `install.sh`（装环境）、`launchd.sh`（定时任务） |
-| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）、Thunderbird 没开时的 bridge（`dead_bridge.py`）、假的 claude 命令（`fake_claude.py`）和 79 个测试 |
+| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）、Thunderbird 没开时的 bridge（`dead_bridge.py`）、假的 claude 命令（`fake_claude.py`）和 88 个测试 |
 | `docs/` | 架构说明、模型后端、常见问题 |
 
 `tests/fake_server.py` 照抄上游 v0.9.2 的工具名、参数和返回结构，所以能在云端或 CI 里跑通整条流水线；换成真 bridge 只是换一个启动命令。

@@ -189,6 +189,18 @@ def _check_lark_response(response: httpx.Response, what: str) -> dict[str, Any]:
     return data
 
 
+def infer_receive_id_type(receive_id: str | None) -> str:
+    """没写 LARK_RECEIVE_ID_TYPE 时按 id 的样子判断：oc_ 是群，ou_ 是个人 open_id，on_ 是 union_id，带 @ 的是邮箱。"""
+    rid = (receive_id or "").strip()
+    if rid.startswith("oc_"):
+        return "chat_id"
+    if rid.startswith("on_"):
+        return "union_id"
+    if "@" in rid:
+        return "email"
+    return "open_id"
+
+
 def build_notifier(settings: Any) -> Notifier:
     backend = settings.notify_backend
     if backend == "console":
@@ -214,5 +226,5 @@ def build_lark_app(settings: Any) -> LarkAppNotifier:
         app_id=settings.lark_app_id,
         app_secret=settings.lark_app_secret,
         receive_id=settings.lark_receive_id or "",
-        receive_id_type=settings.lark_receive_id_type,
+        receive_id_type=settings.lark_receive_id_type or infer_receive_id_type(settings.lark_receive_id),
     )

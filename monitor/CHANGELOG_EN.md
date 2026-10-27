@@ -6,10 +6,22 @@ Recorded increment by increment: what each step added, how far it was verified o
 
 ## Next
 
-1. Connect the Lark app-bot push and receive a test message on the phone with `mail-monitor notify-test`.
+1. Turn push into its own local notification gateway, [notify-hub](https://github.com/yuhang2551/notify-hub) (levels, quiet hours at night, deduplication, retries), and have the mail monitor push through it.
 2. Mark existing mail as seen with `mail-monitor init`, install the launchd jobs, and let it run for real.
 3. Use it for a week: label with `review`, check the miss and noise rates with `eval`, and tune the rules and prompt from the results.
 4. The ChatGPT subscription version (designed in [Model backends](docs/model-backends_EN.md), not urgent).
+
+## 2026-10-27 · Lark push working
+
+**Real-machine test**
+
+- Created the app bot 「通知助手」 in the Lark developer console: turned on the `im:message:send_as_bot` and `im:chat:readonly` permissions, published a version, and added it to a group with only the user in it.
+- `mail-monitor lark-chats` found the chat id, and `mail-monitor notify-test` delivered the test message to the phone.
+
+**Found and fixed during the test**
+
+- With only a chat id filled in and `LARK_RECEIVE_ID_TYPE` left empty, the program treated the id as a personal open_id and Lark rejected it. Now an empty type is worked out from the id's prefix: `oc_` goes to the chat, `ou_` as a direct message; a type you fill in still wins.
+- 88 tests.
 
 ## 2026-10-27 · Claude subscription backend, first read-only dry run on a real machine
 

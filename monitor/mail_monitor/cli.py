@@ -294,11 +294,11 @@ def lark_chats(email: str | None = typer.Option(None, help="顺便按这个邮�
             for chat in chats:
                 typer.echo(f"群：{chat['name'] or '（未命名）'}  chat_id={chat['chat_id']}")
             if chats:
-                typer.echo("\n写进 ~/.mail-monitor/.env：\nMAIL_MONITOR_NOTIFY=lark_app\nLARK_RECEIVE_ID_TYPE=chat_id\nLARK_RECEIVE_ID=<上面的 chat_id>")
+                typer.echo("\n写进 ~/.mail-monitor/.env：\nMAIL_MONITOR_NOTIFY=lark_app\nLARK_RECEIVE_ID=<上面的 chat_id>（oc_ 开头会自动按群发，类型不用填）")
             if email:
                 open_id = await notifier.lookup_open_id(email)
                 if open_id:
-                    typer.echo(f"\n{email} 的 open_id={open_id}（想私聊推送就用 LARK_RECEIVE_ID_TYPE=open_id）")
+                    typer.echo(f"\n{email} 的 open_id={open_id}（想让机器人私聊你，就把它填进 LARK_RECEIVE_ID）")
                 else:
                     typer.echo(f"\n没查到 {email} 对应的用户（检查邮箱是不是这个租户里的，以及权限有没有开）")
         finally:

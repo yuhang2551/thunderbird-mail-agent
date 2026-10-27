@@ -51,7 +51,7 @@ After installing, run `mail-monitor init` once to register existing mail as seen
 **Nothing arrives on my phone**
 
 - Run `mail-monitor notify-test` first and read the error.
-- App bot: is the permission on (`im:message:send_as_bot`), is the version published, is the bot in that group, and do `LARK_RECEIVE_ID_TYPE` and `LARK_RECEIVE_ID` match (`chat_id` goes with a group id, `open_id` with your user id)?
+- App bot: is the permission on (`im:message:send_as_bot`), is the version published, is the bot in that group, and is `LARK_RECEIVE_ID` right (`oc_` is a chat, `ou_` is you)? If you also set `LARK_RECEIVE_ID_TYPE`, it must match the id (`chat_id` goes with a group id, `open_id` with your user id); when unsure, delete that line and the program works it out.
 - Group custom bot: if the group has signature checks on, `LARK_WEBHOOK_SECRET` must be set.
 - For Feishu (the China edition) set `LARK_DOMAIN` to `https://open.feishu.cn`.
 - Mail whose push failed is not lost; it goes into the next digest.
