@@ -59,7 +59,7 @@ class Settings(BaseModel):
     lark_app_id: str | None = None
     lark_app_secret: str | None = None
     lark_receive_id: str | None = None
-    lark_receive_id_type: str = "open_id"
+    lark_receive_id_type: str | None = None  # 不填就按 LARK_RECEIVE_ID 的前缀判断（oc_ 群、ou_ 个人）
 
     # 行动开关：写邮箱的动作默认全关
     action_tag: bool = False

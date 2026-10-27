@@ -6,10 +6,22 @@
 
 ## 下一段
 
-1. 接 Lark 应用机器人推送，用 `mail-monitor notify-test` 在手机上收到测试消息。
+1. 把推送单独做成本机通知网关 [notify-hub](https://github.com/yuhang2551/notify-hub)（分级、夜里免打扰、去重、失败重发），邮件监控改成通过它推送。
 2. `mail-monitor init` 把现有邮件登记为已见，装 launchd 定时任务，真正跑起来。
 3. 用一周：`review` 标注、`eval` 看漏推率和噪声率，按结果调规则和提示词。
 4. ChatGPT 订阅版（做法已写在[模型后端](docs/model-backends.md)里，先不急）。
+
+## 2026-10-27 · Lark 推送测通
+
+**真机实测**
+
+- 在 Lark 开发者后台建了应用机器人「通知助手」：开了 `im:message:send_as_bot` 和 `im:chat:readonly` 两项权限，发布版本，拉进一个只有自己的群「通知」。
+- `mail-monitor lark-chats` 查到群 id，`mail-monitor notify-test` 把测试消息发到了手机上。
+
+**实测中发现并改好**
+
+- 只填了群 id、没填 `LARK_RECEIVE_ID_TYPE` 时，程序默认把它当成个人 open_id 发，Lark 会报错。现在类型不填就按 id 前缀判断：`oc_` 按群发，`ou_` 按私聊发；填了就以填的为准。
+- 测试加到 88 个。
 
 ## 2026-10-27 · Claude 订阅版，真机跑通只读试跑
 

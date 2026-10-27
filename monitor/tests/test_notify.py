@@ -6,7 +6,7 @@ import json
 import httpx
 import pytest
 
-from mail_monitor.notify import LarkAppNotifier, LarkWebhookNotifier, NotifyError, build_notifier, lark_webhook_sign
+from mail_monitor.notify import LarkAppNotifier, LarkWebhookNotifier, NotifyError, build_notifier, infer_receive_id_type, lark_webhook_sign
 from mail_monitor.config import Settings
 
 
@@ -89,3 +89,56 @@ def test_build_notifier_validates_config():
     with pytest.raises(NotifyError, match="LARK_APP_ID"):
         build_notifier(Settings(notify_backend="lark_app"))
     assert build_notifier(Settings(notify_backend="lark_webhook", lark_webhook_url="https://x.example/hook")).name == "lark_webhook"
+
+
+@pytest.mark.parametrize(
+    ("receive_id", "expected"),
+    [
+        ("oc_8fe5d3e4", "chat_id"),
+        ("ou_7d8a6e6d", "open_id"),
+        ("on_94a1ee5f", "union_id"),
+        ("me@example.com", "email"),
+        ("", "open_id"),
+        (None, "open_id"),
+    ],
+)
+def test_infer_receive_id_type(receive_id, expected):
+    assert infer_receive_id_type(receive_id) == expected
+
+
+async def test_app_notifier_sends_to_chat_when_type_left_empty():
+    """只填了群 id、没填 LARK_RECEIVE_ID_TYPE：按群发，而不是当成个人 id 发。"""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/tenant_access_token/internal"):
+            return httpx.Response(200, json={"code": 0, "tenant_access_token": "t-1", "expire": 7200})
+        seen.append(request.url.params["receive_id_type"])
+        return httpx.Response(200, json={"code": 0, "data": {"message_id": "om_1"}})
+
+    settings = Settings(notify_backend="lark_app", lark_app_id="cli_x", lark_app_secret="s", lark_receive_id="oc_1")
+    notifier = build_notifier(settings)
+    assert notifier.receive_id_type == "chat_id"
+    await notifier.aclose()
+    notifier._client = httpx.AsyncClient(base_url="https://open.larksuite.com", transport=httpx.MockTransport(handler))
+    await notifier.send("hi")
+    await notifier.aclose()
+    assert seen == ["chat_id"]
+
+
+def test_explicit_receive_id_type_wins():
+    settings = Settings(
+        notify_backend="lark_app", lark_app_id="cli_x", lark_app_secret="s",
+        lark_receive_id="oc_1", lark_receive_id_type="open_id",
+    )
+    assert build_notifier(settings).receive_id_type == "open_id"
+
+
+def test_empty_receive_id_type_in_env_file_means_infer(tmp_path):
+    from mail_monitor.config import load_settings
+
+    env = tmp_path / ".env"
+    env.write_text("MAIL_MONITOR_NOTIFY=lark_app\nLARK_APP_ID=cli_x\nLARK_APP_SECRET=s\nLARK_RECEIVE_ID=oc_1\nLARK_RECEIVE_ID_TYPE=\n", encoding="utf-8")
+    settings = load_settings(env)
+    assert settings.lark_receive_id_type is None
+    assert build_notifier(settings).receive_id_type == "chat_id"
