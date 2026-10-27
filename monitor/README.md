@@ -177,7 +177,7 @@ pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp、fake_claud
 | `mail_monitor/notify.py`、`render.py` | 推送：终端 / 群机器人 webhook / 应用机器人；推送文本 |
 | `mail_monitor/cli.py` | 命令行 |
 | `scripts/` | `install.sh`（装环境）、`launchd.sh`（定时任务） |
-| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）、Thunderbird 没开时的 bridge（`dead_bridge.py`）、假的 claude 命令（`fake_claude.py`）和 67 个测试 |
+| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）、Thunderbird 没开时的 bridge（`dead_bridge.py`）、假的 claude 命令（`fake_claude.py`）和 76 个测试 |
 | `docs/` | 架构说明、模型后端、常见问题 |
 
 `tests/fake_server.py` 照抄上游 v0.9.2 的工具名、参数和返回结构，所以能在云端或 CI 里跑通整条流水线；换成真 bridge 只是换一个启动命令。

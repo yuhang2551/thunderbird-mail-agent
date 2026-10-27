@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
 # 准备 mail-monitor：建 .venv、装依赖、生成 ~/.mail-monitor/.env 和 rules.yaml（已有的不覆盖）。
 # 用法：./scripts/install.sh
-# 可选环境变量：PYTHON（默认 python3，需要 3.10+）、MAIL_MONITOR_HOME（默认 ~/.mail-monitor）
+# 可选环境变量：PYTHON（不填就自动找 3.10 以上的 python3 或 python3.1x）、MAIL_MONITOR_HOME（默认 ~/.mail-monitor）
 set -euo pipefail
 
 MONITOR_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 HOME_DIR="${MAIL_MONITOR_HOME:-$HOME/.mail-monitor}"
-PY="${PYTHON:-python3}"
+# 提示文字里变量紧跟中文时一律写成 ${变量}：macOS 自带的 bash 3.2 会把中文的第一个字节当成变量名的一部分
 
 die() { echo "❌ $*" >&2; exit 1; }
+new_enough() { "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; }
 
-command -v "$PY" >/dev/null 2>&1 || die "没找到 $PY。macOS 可以 brew install python@3.12，或到 https://www.python.org 下载安装包"
-if ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
-  die "需要 Python 3.10 或更新，现在是 $("$PY" --version 2>&1)。装好新版本后用 PYTHON=python3.12 ./scripts/install.sh"
+# 没指定 PYTHON 时先看 python3；macOS 自带的常常是 3.9，就接着找装过的新版本
+PY="${PYTHON:-}"
+if [ -z "$PY" ]; then
+  PY=python3
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11 python3.10; do
+    if command -v "$candidate" >/dev/null 2>&1 && new_enough "$candidate"; then
+      PY="$candidate"
+      break
+    fi
+  done
 fi
+HOW="可以到 https://www.python.org/downloads/macos/ 下载 Python 3.13 安装包，或者 brew install python@3.13，装好后重新运行 ./scripts/install.sh（其他装法见 docs/faq.md）"
+command -v "$PY" >/dev/null 2>&1 || die "没找到 ${PY}。需要 Python 3.10 或更新，${HOW}"
+new_enough "$PY" || die "需要 Python 3.10 或更新，现在是 $("$PY" --version 2>&1)。${HOW}"
 echo "✅ Python：$("$PY" --version 2>&1)（$(command -v "$PY")）"
 
 cd "$MONITOR_DIR"

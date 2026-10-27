@@ -26,7 +26,7 @@ find_node() {
 }
 
 check_bridge() {
-  [ -f "$BRIDGE" ] || die "找不到 $BRIDGE。请先运行 ./scripts/install-thunderbird-mcp.sh"
+  [ -f "$BRIDGE" ] || die "找不到 ${BRIDGE}。请先运行 ./scripts/install-thunderbird-mcp.sh"
 }
 
 # 备份文件，文件名后加时间戳；同名备份已存在时加序号，不覆盖旧备份

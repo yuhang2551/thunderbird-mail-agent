@@ -40,7 +40,7 @@ fi
 HEAD_COMMIT="$(git -C "$TARGET" rev-parse HEAD)"
 if [ "$HEAD_COMMIT" != "$TBMCP_COMMIT" ]; then
   echo "⚠️  $TARGET 当前的提交是 $HEAD_COMMIT"
-  echo "    不是本仓库审查过的 $TBMCP_VERSION（$TBMCP_COMMIT）。"
+  echo "    不是本仓库审查过的 ${TBMCP_VERSION}（${TBMCP_COMMIT}）。"
   echo "    如果你是有意升级的，请按 docs/security.md 的更新流程审查后，再修改本脚本顶部的版本信息。"
   echo "    如果想回到审查过的版本：git -C \"$TARGET\" fetch --depth 1 origin tag $TBMCP_VERSION && git -C \"$TARGET\" checkout $TBMCP_VERSION"
   exit 2

@@ -82,7 +82,7 @@ load() {
 }
 
 install() {
-  [ -x "$BIN" ] || die "找不到 $BIN。先运行 ./scripts/install.sh（或把 MAIL_MONITOR_BIN 指向 mail-monitor）"
+  [ -x "$BIN" ] || die "找不到 ${BIN}。先运行 ./scripts/install.sh（或把 MAIL_MONITOR_BIN 指向 mail-monitor）"
   [ -f "$HOME_DIR/.env" ] || die "没有 $HOME_DIR/.env。先按 README 配置好，并跑通 mail-monitor doctor"
   mkdir -p "$AGENTS" "$LOG_DIR"
   run_plist > "$AGENTS/$PREFIX.run.plist"
@@ -109,9 +109,9 @@ status() {
   for label in "$PREFIX.run" "$PREFIX.digest"; do
     if [ -f "$AGENTS/$label.plist" ]; then
       line="$(launchctl list 2>/dev/null | awk -v l="$label" '$3 == l {print "pid=" $1 " 上次退出码=" $2}')"
-      echo "✅ $label：已安装${line:+（$line）}"
+      echo "✅ ${label}：已安装${line:+（${line}）}"
     else
-      echo "⏹  $label：未安装"
+      echo "⏹  ${label}：未安装"
     fi
   done
   for name in run digest; do

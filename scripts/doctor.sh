@@ -8,7 +8,7 @@ set -uo pipefail
 ok=1
 NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
 if [ -n "$NODE_BIN" ]; then
-  echo "✅ Node.js：$NODE_BIN（$("$NODE_BIN" -v)）"
+  echo "✅ Node.js：${NODE_BIN}（$("$NODE_BIN" -v)）"
 else
   echo "❌ 没找到 Node.js"; exit 1
 fi
@@ -16,7 +16,7 @@ fi
 if [ -f "$BRIDGE" ]; then
   echo "✅ 转接程序：$BRIDGE"
 else
-  echo "❌ 找不到 $BRIDGE，请先运行 ./scripts/install-thunderbird-mcp.sh"; exit 1
+  echo "❌ 找不到 ${BRIDGE}，请先运行 ./scripts/install-thunderbird-mcp.sh"; exit 1
 fi
 
 if [ -d "$THUNDERBIRD_MCP_DIR/.git" ]; then

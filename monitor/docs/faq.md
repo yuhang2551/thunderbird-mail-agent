@@ -6,13 +6,18 @@
 
 ## 安装
 
-**install.sh 说 Python 版本太低**
+**install.sh 说 Python 版本太低，或者没找到 Python**
 
-macOS 自带的 `python3` 常常是 3.9，而这个程序要 3.10 以上。用 Homebrew 装一个新的，再告诉脚本用它：
+macOS 自带的 `python3` 常常是 3.9，而这个程序要 3.10 以上。脚本会自己找装过的 `python3.13`、`python3.12` 这类新版本，都没有才报错。任选一种装法，装好后重新运行 `./scripts/install.sh`：
+
+- 官方安装包（不需要 Homebrew）：到 [python.org](https://www.python.org/downloads/macos/) 下载 Python 3.13 的 macOS 安装包，双击安装。
+- Homebrew：`brew install python@3.13`。
+- uv（装在你的用户目录里，不要管理员密码）：
 
 ```bash
-brew install python@3.12
-PYTHON=python3.12 ./scripts/install.sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+~/.local/bin/uv python install 3.13
+PYTHON="$(~/.local/bin/uv python find 3.13)" ./scripts/install.sh
 ```
 
 **提示 `mail-monitor: command not found`**

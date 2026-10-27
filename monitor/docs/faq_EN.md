@@ -6,13 +6,18 @@ Run `mail-monitor doctor` first. It only checks and changes nothing, and it poin
 
 ## Installing
 
-**install.sh says Python is too old**
+**install.sh says Python is too old, or cannot find Python**
 
-The `python3` that ships with macOS is often 3.9, and this program needs 3.10 or later. Install a newer one with Homebrew and tell the script to use it:
+The `python3` that ships with macOS is often 3.9, and this program needs 3.10 or later. The script looks for newer interpreters such as `python3.13` or `python3.12` on its own and stops only when it finds none. Install one in any of these ways, then run `./scripts/install.sh` again:
+
+- Official installer (no Homebrew needed): download the Python 3.13 macOS installer from [python.org](https://www.python.org/downloads/macos/) and double-click it.
+- Homebrew: `brew install python@3.13`.
+- uv (installs into your home folder, no admin password):
 
 ```bash
-brew install python@3.12
-PYTHON=python3.12 ./scripts/install.sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+~/.local/bin/uv python install 3.13
+PYTHON="$(~/.local/bin/uv python find 3.13)" ./scripts/install.sh
 ```
 
 **`mail-monitor: command not found`**
