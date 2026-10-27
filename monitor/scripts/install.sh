@@ -31,7 +31,7 @@ if [ -e "$HOME_DIR/.env" ]; then
   echo "⏭  已存在，保留：$HOME_DIR/.env"
 else
   cp .env.example "$HOME_DIR/.env"; chmod 600 "$HOME_DIR/.env"
-  echo "✅ 生成 $HOME_DIR/.env（请填 DEEPSEEK_API_KEY 和推送配置）"
+  echo "✅ 生成 $HOME_DIR/.env（请选模型：填 DEEPSEEK_API_KEY，或设 MAIL_MONITOR_LLM=claude 用 Claude 订阅；再填推送配置）"
 fi
 if [ -e "$HOME_DIR/rules.yaml" ]; then
   echo "⏭  已存在，保留：$HOME_DIR/rules.yaml"

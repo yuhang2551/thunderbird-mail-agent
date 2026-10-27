@@ -2,18 +2,18 @@
 
 **中文** | [English](model-backends_EN.md)
 
-判断层只需要模型做一件事：给它一段提示词，它还回来一个 JSON（谁、什么事、要不要管……）。谁来回答这个问题，就是"模型后端"。计划支持两类：
+判断层只需要模型做一件事：给它一段提示词，它还回来一个 JSON（谁、什么事、要不要管……）。谁来回答这个问题，就是"模型后端"。分两类：
 
 - **API key 版**：程序拿你的 API key 直接调模型接口，按 token 付费。**已实现**，默认用 DeepSeek。
-- **订阅版**：已经在付 ChatGPT 或 Claude 的月费，就用套餐里的额度，不用另开 API。**设计已定，代码还没写**。
+- **订阅版**：已经在付 ChatGPT 或 Claude 的月费，就用套餐里的额度，不用另开 API。**Claude 订阅版已实现**（2026-10-27）；**ChatGPT 订阅版设计已定，代码还没写**。
 
 ## 一览
 
 | | API key 版 | ChatGPT 订阅版 | Claude 订阅版 |
 |---|---|---|---|
-| 状态 | 已实现 | 设计已定，代码还没写 | 设计已定，代码还没写 |
-| 需要什么 | 一个 API key（默认 DeepSeek） | ChatGPT 付费套餐，浏览器里授权一次 | Claude Pro / Max，Mac 上装好并登录 Claude Code |
-| 怎么调 | 程序直接请求 `/chat/completions` | 程序直接请求 OpenAI 的 `/v1/responses`，带授权拿到的令牌 | 程序调用你电脑上的 `claude -p` 命令 |
+| 状态 | 已实现 | 设计已定，代码还没写 | 已实现 |
+| 需要什么 | 一个 API key（默认 DeepSeek） | ChatGPT 付费套餐，浏览器里授权一次 | Claude Pro / Max，Mac 上装好并登录 Claude Code（v2.1.259 以上） |
+| 怎么调 | 程序直接请求 `/chat/completions` | 程序直接请求 OpenAI 的 `/v1/responses`，带授权拿到的令牌 | 程序调用你电脑上的 `claude -p` 命令，每封邮件一次 |
 | 花钱 | 按 token 计费，deepseek-flash 每封不到 0.1 美分 | 不另外花钱，算在套餐用量里 | 不另外花钱，算在套餐用量里 |
 | 快慢 | 快 | 和 API 差不多 | 最慢：每次要启动一次 Claude Code |
 | 官方态度 | 正常用法 | 2026 年 9 月起对开源项目和本地运行的个人项目开放 | 只允许你自己用官方的 Claude Code；第三方程序不能借用订阅 |
@@ -45,7 +45,7 @@ LLM_MODEL=deepseek-flash      # 可选，默认就是它
 
 Claude 的 API key 也能接，但 Anthropic 有自己的接口和官方 SDK，需要另写一个后端，目前没做。
 
-## 订阅版（设计已定，代码还没写）
+## 订阅版
 
 ### 为什么不能"直接调两家内部的模型"
 
@@ -56,7 +56,7 @@ ChatGPT Plus / Pro、Claude Pro / Max 这些订阅本身不带 API，是给两�
 
 两家的规则今年都变过，用之前再看一眼文末的原文链接。
 
-### ChatGPT 订阅版：Sign in with ChatGPT
+### ChatGPT 订阅版：Sign in with ChatGPT（设计已定，代码还没写）
 
 1. **授权一次**：运行 `mail-monitor chatgpt-login`（计划中的命令）。程序在 `127.0.0.1` 上临时开一个回调端口，打开浏览器到 OpenAI 的登录页（OAuth，带 PKCE）。你登录 ChatGPT，同意这个程序使用你的套餐额度。OpenAI 在这一步给程序动态注册一个 client，不需要 client secret，也不需要 API key。
 2. **保存令牌**：拿到的 access token 和会轮换的 refresh token 存进 `~/.mail-monitor/chatgpt-auth.json`，权限 600，不进仓库、不写日志。过期了程序自己用 refresh token 续，launchd 定时跑也不用再登录。
@@ -77,48 +77,74 @@ ChatGPT Plus / Pro、Claude Pro / Max 这些订阅本身不带 API，是给两�
 
 **备选**：`codex exec --output-schema`（Codex CLI 用它保存的 ChatGPT 登录）也能做到。但它每次都启动一个带命令行工具的 Agent，还会加载 `~/.codex/config.toml` 里的 MCP 服务器（本仓库的 `setup-codex.sh` 会把邮件工具写进去，得用 `--ignore-user-config` 关掉），OpenAI 也说自动化场景默认该用 API key。所以只当备选。
 
-### Claude 订阅版：调用本机已登录的 Claude Code
+### Claude 订阅版：调用本机已登录的 Claude Code（已实现）
 
-**只给你自己用**：你的 Mac、你自己的订阅、官方的 `claude` 命令。程序不读、不存任何 Claude 的令牌，也不能把它部署成给别人用的服务。Pro / Max 的额度按"普通个人使用"设计，所以每次巡检最多调用一次：把这一轮需要模型判断的邮件合成一批（最多 10 封）。
+**只给你自己用**：你的 Mac、你自己的订阅、官方的 `claude` 命令。程序不读、不存任何 Claude 的令牌，也不能把它部署成给别人用的服务。
 
-计划的调用方式：
+**怎么开**：
+
+1. Mac 上装好 Claude Code（v2.1.259 以上，旧了就运行 `claude update`），在终端运行一次 `claude`，输入 `/login`，用你的 Claude 账号（Pro / Max）登录。
+2. 在 `~/.mail-monitor/.env` 里写 `MAIL_MONITOR_LLM=claude`，不用填任何 key。
+3. `mail-monitor doctor` 检查 claude 的版本和登录方式，不调用模型、不花额度；再用 `mail-monitor run --dry-run` 真判断一次看看。
+
+可选配置：`MAIL_MONITOR_CLAUDE_MODEL`（默认 `sonnet`，想省额度改成 `haiku`）、`MAIL_MONITOR_CLAUDE_BIN`（launchd 定时跑时找不到 claude，就写 `which claude` 显示的完整路径）、`MAIL_MONITOR_CLAUDE_TIMEOUT`（一封最多等几秒，默认 180）。
+
+**每封需要模型判断的邮件，程序这样调用一次**：
 
 ```bash
 cd ~/.mail-monitor/claude-run          # 一个空目录
-claude -p \
-  --model sonnet \
-  --system-prompt-file <分诊提示词> \
-  --output-format json --json-schema '<一批判断结果的 schema>' \
-  --tools "" --strict-mcp-config --disallowedTools "mcp__*" \
+claude -p --safe-mode \
+  --tools "" --strict-mcp-config \
   --permission-prompts none \
   --no-session-persistence \
-  < <这批邮件>
+  --model sonnet --effort low \
+  --system-prompt-file <分诊提示词> \
+  --output-format json \
+  < <这封邮件的元数据、记忆和正文>
 ```
 
-结果在返回 JSON 的 `structured_output` 字段里，已经按 schema 校验过；程序再按编号把结果对回每封邮件。每个参数为什么要加：
+返回的 JSON 里，`result` 是模型的回答。程序从里面取出 JSON，和 API 版走同一套 Pydantic 校验、重试和保底。每个参数为什么要加：
 
 | 参数 | 为什么 |
 |---|---|
-| `--system-prompt-file` | 整个替换 Claude Code 默认的编程助手提示词。官方文档的建议是：身份和权限都和编程无关、没人盯着的流水线，就该整个替换。也更省额度 |
-| `--output-format json --json-schema` | 让结果按我们的结构输出，放在 `structured_output` 字段 |
-| `--tools ""`、`--strict-mcp-config`、`--disallowedTools "mcp__*"` | 不给任何工具。本仓库的 `setup-claude-code.sh` 会把邮件工具装成用户级 MCP，不关的话，读邮件的这个 Claude 就能调发信、改邮件的工具；邮件内容是不可信的，"有人在邮件里写一句话让它转发收件箱"就成了真实风险 |
-| `--permission-prompts none` | 没人在电脑前点"允许"，有权限请求就直接拒绝（需要 Claude Code v2.1.259 以上） |
+| `--safe-mode` | 不加载 CLAUDE.md、hooks、插件、技能和 MCP 服务器（v2.1.169 起有）。你自己的 `~/.claude/CLAUDE.md` 不会混进分诊提示词，你配的 hooks 也不会每封邮件跑一遍 |
+| `--tools ""`、`--strict-mcp-config` | 不给任何工具。本仓库的 `setup-claude-code.sh` 会把邮件工具装成用户级 MCP，不关的话，读邮件的这个 Claude 就能调发信、改邮件的工具；邮件内容是不可信的，"有人在邮件里写一句话让它转发收件箱"就成了真实风险 |
+| `--permission-prompts none` | 没人在电脑前点"允许"，有权限请求就直接拒绝（需要 v2.1.259 以上） |
 | `--no-session-persistence` | 不把会话存进 `~/.claude/projects/`。那里默认明文保存 30 天，而会话里全是邮件内容 |
-| 在空目录里运行 | 不加 `--bare` 时，`claude -p` 会执行当前目录项目里的 hooks、连接 `.mcp.json` 里的服务器，所以不能在 `~/mail-workspace` 或仓库目录里跑 |
+| `--effort low` | 分诊用不着长推理，更快，也少用额度 |
+| `--system-prompt-file` | 整个替换 Claude Code 默认的编程助手提示词。官方文档的建议是：身份和权限都和编程无关、没人盯着的流水线，就该整个替换。也更省额度 |
+| `--output-format json` | 回答和出错信息都包在一个 JSON 对象里，程序好解析 |
+| 在空目录里运行 | `claude -p` 会执行当前目录项目里的 hooks、连接 `.mcp.json` 里的服务器，所以不能在 `~/mail-workspace` 或仓库目录里跑 |
 | 不加 `--bare` | bare 模式不读订阅登录，只认 `ANTHROPIC_API_KEY` |
+| 去掉 `ANTHROPIC_API_KEY` | 环境里有这个变量时，claude 会改用 API key 按量计费。程序调用前把它和 `ANTHROPIC_AUTH_TOKEN` 从环境里去掉 |
 | 邮件从标准输入传 | 不出现在命令行参数里，别的程序用 `ps` 看不到邮件内容 |
 
-`mail-monitor doctor` 会用 `claude auth status` 检查登录方式是不是订阅（`authMethod` 为 `claude.ai`）。
+**和 10 月 17 日的设计相比改了两处**：
 
-**合成一批的代价**：同一批里，一封邮件里的注入文字可能影响别的邮件的判断。因为没有任何工具可调，最坏结果是判错；每封邮件用编号和分隔符包起来，缺了或对不上的那封退回"拿不准"，仍然会推送。
+- **一封一问，不合批**。原计划把一轮要判断的邮件合成一批、只调用一次，为了省额度。但合批省下的只是重复的那段提示词，代价是同一批里一封邮件的注入文字可能影响别的邮件的判断。现在和 API 版一样一封一问，每封的判断互不影响；通常一轮巡检只有零到几封需要模型。
+- **不用 `--json-schema`**。Claude Code 的结构化输出是靠一个内部工具（StructuredOutput）实现的，而这里关掉了所有工具，两者一起用可不可靠，官方文档没有说清楚。所以和 API 版一样，提示词要求只输出 JSON，程序自己校验。
 
-### 统一的开关（计划）
+**出错时**：
+
+| 情况 | 程序怎么做 |
+|---|---|
+| claude 没登录或登录失效 | 这一轮不再调用 claude，规则没定性的邮件按「拿不准」照常推送；`run` 的输出和日志里写着"在终端运行 claude，输入 /login" |
+| 订阅额度暂时用完 | 同上；额度恢复后，下一轮自动恢复 |
+| 找不到 claude 命令、版本太旧 | 同上，提示装好 Claude Code 或运行 `claude update` |
+| 超时（默认 180 秒） | 同上；卡住一次多半下一次也会卡，比如断网，这一轮就不再等 |
+| 回答里没有 JSON | 重试一次，再不行这封按「拿不准」推送 |
+
+`mail-monitor doctor` 用 `claude --version` 和 `claude auth status` 检查：版本够不够；登录方式是不是订阅（`authMethod` 为 `claude.ai`，或者 `claude setup-token` 生成的长期令牌 `oauth_token`）。用 API key 登录、或者配置成第三方云（Bedrock 之类）的，会直接报错。
+
+**用量**：每封要判断的邮件调用一次，输入是提示词、记忆和正文前 4000 字，输出两三百字的 JSON，算在你的订阅用量里，和你平时用 Claude 共用一份额度。想省一点：多写规则（规则定性的邮件不调模型），或者把模型换成 `haiku`。
+
+### 切换后端
 
 ```bash
-MAIL_MONITOR_LLM=api        # api（默认）| chatgpt | claude
+MAIL_MONITOR_LLM=api        # api（默认）| claude；chatgpt 还没做
 ```
 
-三种后端都只做"提示词进、JSON 出"，在程序里是同一个接口 `chat_json(system, user) -> dict`。提示词、输出结构、Pydantic 校验、失败重试、退回"拿不准"都在判断层，三种后端共用，`classify.py` 不用改。测试用假的 `claude` 命令和假的 Responses 接口，不需要真账号。
+两种后端在程序里是同一个接口 `chat_json(system, user) -> dict`：API 版在 `llm.py`，Claude 订阅版在 `claude_cli.py`。提示词、输出结构、Pydantic 校验、失败重试、退回"拿不准"都在判断层（`classify.py`），两种后端共用；判断层只多认一件事：没登录、额度用完这类错误重试也没用，就不再重试。测试用一个假的 `claude` 命令（`tests/fake_claude.py`），不需要真账号。
 
 ## 数据去哪了
 
@@ -143,8 +169,8 @@ MAIL_MONITOR_LLM=api        # api（默认）| chatgpt | claude
 
 放在最后，前面的验证码、订阅规则对这个邮箱照样生效。
 
-## 参考（2026-10-17 查阅）
+## 参考（2026-10-17 查阅，Claude 部分 2026-10-27 复查）
 
-- Claude Code：[法律与合规（认证和凭证的使用）](https://code.claude.com/docs/en/legal-and-compliance)、[非交互模式](https://code.claude.com/docs/en/headless)、[命令行参数](https://code.claude.com/docs/en/cli-reference)、[数据使用](https://code.claude.com/docs/en/data-usage)、[Agent SDK 概览](https://code.claude.com/docs/en/agent-sdk/overview)
+- Claude Code：[法律与合规（认证和凭证的使用）](https://code.claude.com/docs/en/legal-and-compliance)、[非交互模式](https://code.claude.com/docs/en/headless)、[命令行参数](https://code.claude.com/docs/en/cli-reference)、[数据使用](https://code.claude.com/docs/en/data-usage)、[Agent SDK 概览](https://code.claude.com/docs/en/agent-sdk/overview)、[结构化输出](https://code.claude.com/docs/zh-CN/agent-sdk/structured-outputs)、[v2.1.169 更新说明（--safe-mode）](https://github.com/anthropics/claude-code/releases/tag/v2.1.169)
 - OpenAI：[在开源应用里接入 Sign in with ChatGPT](https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt)、[套餐额度概览](https://developers.openai.com/siwc/token-sharing-open-source)、[登录和注册](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)、[模型和请求](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)、[预览期限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)、[帮助中心：在其他应用里使用 ChatGPT 套餐](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites)、[Codex 非交互模式](https://developers.openai.com/codex/noninteractive)
 - DeepSeek：[更新日志](https://api-docs.deepseek.com/updates/)、[模型和价格](https://api-docs.deepseek.com/quick_start/pricing/)、[思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)、[隐私政策](https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html)

@@ -2,6 +2,7 @@
 
 两种实现：
 - LLMClassifier：把元数据、正文和记忆交给模型，要求固定 schema 的 JSON，用 Pydantic 校验；失败重试一次，再失败退回 Fallback。
+  模型是谁不重要：API 版和 Claude 订阅版都只是一个 ChatClient。
 - FallbackClassifier：没有模型（或模型挂了）时的保底——一律"拿不准"，宁可多推也不漏。
 """
 from __future__ import annotations
@@ -13,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ValidationError, field_validator
 
-from .llm import LLMClient, LLMError
+from .llm import ChatClient, LLMError
 from .memory import Memory
 from .models import CATEGORIES, RELATIONS, Decision, MessageHeader
 
@@ -144,8 +145,9 @@ class LLMVerdict(BaseModel):
 
 
 class LLMClassifier:
-    def __init__(self, client: LLMClient, *, timezone: str | None = None, body_chars: int = 4000, profile: str | None = None):
+    def __init__(self, client: ChatClient, *, timezone: str | None = None, body_chars: int = 4000, profile: str | None = None):
         self.client = client
+        self.model_error: str | None = None  # 重试也没用的错误（比如没登录、额度用完），流水线会把它报出来
         self.tz_name = timezone
         self.tz = ZoneInfo(timezone) if timezone else datetime.now().astimezone().tzinfo
         self.body_chars = body_chars
@@ -203,5 +205,8 @@ class LLMClassifier:
             except (LLMError, ValidationError) as exc:
                 last_error = exc
                 log.warning("LLM 判断失败（第 %d 次）：%s", attempt + 1, exc)
-        log.error("LLM 两次都失败，退回保底判断：%s", last_error)
+                if not getattr(exc, "retryable", True):
+                    self.model_error = self.model_error or str(exc)
+                    break
+        log.error("LLM 判断失败，退回保底判断：%s", last_error)
         return await self.fallback.classify(header, body, hints, memory)

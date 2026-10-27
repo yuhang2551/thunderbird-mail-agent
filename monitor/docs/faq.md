@@ -70,7 +70,7 @@ DeepSeek 在 2026-07-24 停用了 `deepseek-chat` 和 `deepseek-reasoner`。在 
 
 **推送末尾写着"没有模型判断，按「拿不准」推送"**
 
-这封邮件没有经过模型：要么 `.env` 里没填 key，要么模型连续两次出错。看日志里的"LLM 判断失败"，DeepSeek 常见的几种：
+这封邮件没有经过模型：要么 `.env` 里既没填 key、也没开 Claude 订阅版，要么模型出错了。`mail-monitor run` 的输出和日志里的"LLM 判断失败"会写原因。DeepSeek 常见的几种：
 
 | 报错 | 原因 |
 |---|---|
@@ -80,9 +80,21 @@ DeepSeek 在 2026-07-24 停用了 `deepseek-chat` 和 `deepseek-reasoner`。在 
 | HTTP 429 | 请求太快 |
 | 模型没有返回 JSON | 偶尔会有，重试一次通常就好；经常出现的话把日志贴出来 |
 
-**想换别家模型、本地模型，或者用 ChatGPT / Claude 订阅代替 API key**
+**用 Claude 订阅版时，doctor 说 claude 没登录、或者用的是 API key**
 
-见 [模型后端](model-backends.md)。订阅版的设计已经定了，代码还没写。
+在终端运行 `claude`，输入 `/login`，选用 Claude 账号（Pro / Max）登录，再跑一次 `mail-monitor doctor`。用 API key 登录会按量计费，不算订阅。
+
+**用 Claude 订阅版时，日志说订阅额度用完了**
+
+订阅额度和你平时用 Claude 是共用的。用完的这段时间，规则没定性的邮件照常按「拿不准」推送，不会漏；额度恢复后自动恢复。想少用一点：多写规则，或者在 `.env` 里设 `MAIL_MONITOR_CLAUDE_MODEL=haiku`。
+
+**终端里能跑，launchd 定时跑时说找不到 claude**
+
+launchd 的 PATH 和终端不一样。用 `which claude` 看完整路径，写进 `.env` 的 `MAIL_MONITOR_CLAUDE_BIN`；或者重新运行 `./scripts/launchd.sh install`，它会把当时 claude 所在的目录写进 PATH。
+
+**想换别家模型、本地模型，或者用 ChatGPT 订阅代替 API key**
+
+见 [模型后端](model-backends.md)。ChatGPT 订阅版的设计已经定了，代码还没写。
 
 ## 定时运行
 

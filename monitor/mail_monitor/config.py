@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 DEFAULT_HOME = Path.home() / ".mail-monitor"
 NotifyBackend = Literal["console", "lark_webhook", "lark_app"]
+LLMBackend = Literal["api", "claude"]
 
 
 class Settings(BaseModel):
@@ -32,6 +33,9 @@ class Settings(BaseModel):
     rules_path: Path | None = None
     timezone: str | None = None  # 例如 Asia/Dubai；不填用系统时区
 
+    # 模型后端：api = 拿 API key 调 OpenAI 兼容接口；claude = 调本机已登录的 Claude Code，用 Claude 订阅（只限自己用）
+    llm_backend: LLMBackend = "api"
+
     # LLM（OpenAI 兼容接口，默认 DeepSeek）
     llm_api_key: str | None = None
     llm_base_url: str = "https://api.deepseek.com"
@@ -41,6 +45,11 @@ class Settings(BaseModel):
     llm_extra_body: dict[str, Any] | None = None
     # 一句话介绍收件人（在读什么、找什么工作、导师是谁），写进提示词，模型判断"谁、要不要管"更准
     profile: str | None = None
+
+    # Claude 订阅版（MAIL_MONITOR_LLM=claude）
+    claude_bin: str = "claude"  # launchd 下找不到时写完整路径（which claude）
+    claude_model: str = "sonnet"  # 想省订阅用量可以换 haiku
+    claude_timeout: float = 180.0  # 一封邮件最多等几秒
 
     # 推送
     notify_backend: NotifyBackend = "console"
@@ -73,7 +82,12 @@ class Settings(BaseModel):
 
     @property
     def llm_enabled(self) -> bool:
-        return bool(self.llm_api_key)
+        return self.llm_backend == "claude" or bool(self.llm_api_key)
+
+    @property
+    def claude_workdir(self) -> Path:
+        # claude -p 在这个空目录里跑：它会执行当前目录项目里的 hooks、连 .mcp.json 里的服务器
+        return self.home / "claude-run"
 
     @property
     def resolved_llm_extra_body(self) -> dict[str, Any]:
@@ -101,6 +115,7 @@ ENV_MAP: dict[str, str] = {
     "MAIL_MONITOR_DB": "db_path",
     "MAIL_MONITOR_RULES": "rules_path",
     "MAIL_MONITOR_TZ": "timezone",
+    "MAIL_MONITOR_LLM": "llm_backend",
     "DEEPSEEK_API_KEY": "llm_api_key",
     "LLM_API_KEY": "llm_api_key",
     "LLM_BASE_URL": "llm_base_url",
@@ -108,6 +123,9 @@ ENV_MAP: dict[str, str] = {
     "LLM_BODY_CHARS": "llm_body_chars",
     "LLM_EXTRA_BODY": "llm_extra_body",
     "MAIL_MONITOR_PROFILE": "profile",
+    "MAIL_MONITOR_CLAUDE_BIN": "claude_bin",
+    "MAIL_MONITOR_CLAUDE_MODEL": "claude_model",
+    "MAIL_MONITOR_CLAUDE_TIMEOUT": "claude_timeout",
     "MAIL_MONITOR_NOTIFY": "notify_backend",
     "LARK_DOMAIN": "lark_domain",
     "LARK_WEBHOOK_URL": "lark_webhook_url",
@@ -139,6 +157,13 @@ def _coerce(field: str, raw: str) -> Any:
         return value.lower() in ("1", "true", "yes", "on")
     if field in _PATH_FIELDS:
         return Path(value).expanduser()
+    if field == "llm_backend":
+        choice = value.lower()
+        if choice == "chatgpt":
+            raise ValueError("ChatGPT 订阅版还没做，先用 api 或 claude")
+        if choice not in ("api", "claude"):
+            raise ValueError("只能是 api 或 claude")
+        return choice
     if field in _JSON_FIELDS:
         try:
             data = json.loads(value)

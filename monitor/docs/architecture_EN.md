@@ -15,7 +15,7 @@ An agent is usually split into perception, decision, action, memory and push. Ea
 | Part | What it is here | Code |
 |---|---|---|
 | Perception | Calls the Thunderbird add-on's tools over MCP to get the headers and bodies of new mail | `mailbox.py` |
-| Decision | Rules go first; whatever they do not settle goes to the model, which only returns JSON with fixed fields, used only after validation | `rules.py`, `classify.py`, `llm.py` |
+| Decision | Rules go first; whatever they do not settle goes to the model, which only returns JSON with fixed fields, used only after validation | `rules.py`, `classify.py`, `llm.py`, `claude_cli.py` |
 | Memory | SQLite: which mail was handled, who each sender is, what the same thread said before, your labels | `state.py`, `memory.py` |
 | Action | Read-only by default. The one write is tagging "needs action" mail, off by default; it never sends or deletes | `pipeline.py` |
 | Push | Instant messages and the morning and evening digest, to the terminal, a Lark group bot or a Lark app bot | `notify.py`, `render.py` |
@@ -32,7 +32,7 @@ flowchart LR
         M <--> D[("SQLite<br/>state.db")]
         R["rules.yaml"] --> M
     end
-    M -->|"mail the rules did not settle"| A["Model<br/>DeepSeek by default"]
+    M -->|"mail the rules did not settle"| A["Model<br/>DeepSeek API or Claude subscription"]
     M -->|"one-line summary"| K["Lark / Feishu"]
 ```
 
@@ -171,7 +171,7 @@ A sender's identity has three sources, from highest to lowest priority: what you
 |---|---|
 | The mail itself | Thunderbird on your computer. The program keeps no copy of bodies |
 | Verdicts, sender identities, your labels | `~/.mail-monitor/state.db` on your computer, with subjects and one-line summaries only |
-| Mail the rules did not settle: sender, recipients, subject, time, the first 4,000 characters of the body, related memory, your profile | The model you configured, DeepSeek by default. How the backends differ: [Model backends](model-backends_EN.md#where-your-data-goes) |
+| Mail the rules did not settle: sender, recipients, subject, time, the first 4,000 characters of the body, related memory, your profile | The model you configured: DeepSeek by default for the API-key version, Anthropic for the Claude subscription version. How the backends differ: [Model backends](model-backends_EN.md#where-your-data-goes) |
 | Mail a rule settles outright (verification codes, newsletters …) | No model |
 | Pushes: who, what, deadline, suggestion, subject and time | Lark. No bodies; without a model verdict, "what" is the subject plus the first 80 characters of the preview |
 | API key, Lark credentials | `~/.mail-monitor/.env`, created by `install.sh` with mode 600, never in the repository |

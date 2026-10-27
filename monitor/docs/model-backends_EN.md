@@ -2,18 +2,18 @@
 
 [中文](model-backends.md) | **English**
 
-The verdict layer needs exactly one thing from a model: send it a prompt, get back a JSON object (who, what, does it need action …). Whoever answers that request is the "model backend". Two kinds are planned:
+The verdict layer needs exactly one thing from a model: send it a prompt, get back a JSON object (who, what, does it need action …). Whoever answers that request is the "model backend". There are two kinds:
 
 - **API-key version**: the program calls a model API with your key and you pay per token. **Built**, DeepSeek by default.
-- **Subscription version**: if you already pay for ChatGPT or Claude, use the plan's allowance instead of opening an API account. **Designed, not yet built**.
+- **Subscription version**: if you already pay for ChatGPT or Claude, use the plan's allowance instead of opening an API account. **The Claude subscription version is built** (2026-10-27); **the ChatGPT one is designed, not yet built**.
 
 ## At a glance
 
 | | API-key version | ChatGPT subscription | Claude subscription |
 |---|---|---|---|
-| Status | Built | Designed, not yet built | Designed, not yet built |
-| You need | An API key (DeepSeek by default) | A paid ChatGPT plan, authorized once in the browser | Claude Pro / Max, with Claude Code installed and signed in on the Mac |
-| How it is called | The program posts to `/chat/completions` | The program posts to OpenAI's `/v1/responses` with the token from that authorization | The program runs the `claude -p` command on your computer |
+| Status | Built | Designed, not yet built | Built |
+| You need | An API key (DeepSeek by default) | A paid ChatGPT plan, authorized once in the browser | Claude Pro / Max, with Claude Code (v2.1.259 or later) installed and signed in on the Mac |
+| How it is called | The program posts to `/chat/completions` | The program posts to OpenAI's `/v1/responses` with the token from that authorization | The program runs the `claude -p` command on your computer, once per message |
 | Cost | Per token; with deepseek-flash, under 0.1 US cent per message | Nothing extra; counts against the plan's usage | Nothing extra; counts against the plan's usage |
 | Speed | Fast | About the same as the API | Slowest: Claude Code starts up on every call |
 | Vendor's position | Normal use | Open since September 2026 to open-source projects and personal projects that run locally | Only you, through the official Claude Code; third-party programs may not use a subscription |
@@ -45,7 +45,7 @@ The program sends one request to `{LLM_BASE_URL}/chat/completions` in JSON mode 
 
 A Claude API key would work too, but Anthropic has its own API and official SDK, so it needs a backend of its own, which does not exist yet.
 
-## The subscription version (designed, not yet built)
+## The subscription version
 
 ### Why it cannot "just call the vendor's models directly"
 
@@ -56,7 +56,7 @@ ChatGPT Plus / Pro and Claude Pro / Max come without an API; they are for the ve
 
 Both vendors changed their rules this year; check the sources at the end before relying on this.
 
-### ChatGPT subscription: Sign in with ChatGPT
+### ChatGPT subscription: Sign in with ChatGPT (designed, not yet built)
 
 1. **Authorize once**: run `mail-monitor chatgpt-login` (a planned command). The program opens a temporary callback port on `127.0.0.1` and sends the browser to OpenAI's sign-in page (OAuth with PKCE). You sign in to ChatGPT and allow this program to use your plan. OpenAI registers a client for the program during this step, so neither a client secret nor an API key is needed.
 2. **Store the tokens**: the access token and the rotating refresh token go into `~/.mail-monitor/chatgpt-auth.json` with mode 600, never into the repository or the logs. When the access token expires the program renews it with the refresh token, so scheduled runs under launchd never need another sign-in.
@@ -77,48 +77,74 @@ One thing to test while building it: the docs for this route do not say whether 
 
 **Alternative**: `codex exec --output-schema` (Codex CLI with its saved ChatGPT sign-in) can do the same. But it starts an agent with shell tools on every call and loads the MCP servers in `~/.codex/config.toml` (this repository's `setup-codex.sh` puts the mail tools there, so it would need `--ignore-user-config`), and OpenAI says API keys are the right default for automation. So it stays a fallback option.
 
-### Claude subscription: call the Claude Code you are signed in to
+### Claude subscription: call the Claude Code you are signed in to (built)
 
-**For you only**: your Mac, your own subscription, the official `claude` command. The program never reads or stores any Claude token, and it must not be deployed as a service for other people. Pro / Max limits assume ordinary individual use, so each check makes at most one call: the messages that need the model in that round go in one batch (at most 10).
+**For you only**: your Mac, your own subscription, the official `claude` command. The program never reads or stores any Claude token, and it must not be deployed as a service for other people.
 
-The planned call:
+**Turning it on**:
+
+1. Install Claude Code on the Mac (v2.1.259 or later; run `claude update` if it is older), run `claude` once in a terminal, type `/login`, and sign in with your Claude account (Pro / Max).
+2. Put `MAIL_MONITOR_LLM=claude` in `~/.mail-monitor/.env`. No key is needed.
+3. `mail-monitor doctor` checks the claude version and how it is signed in, without calling the model or using any allowance; then `mail-monitor run --dry-run` makes real verdicts once.
+
+Optional: `MAIL_MONITOR_CLAUDE_MODEL` (default `sonnet`; `haiku` uses less of the allowance), `MAIL_MONITOR_CLAUDE_BIN` (if launchd cannot find claude, the full path that `which claude` shows), `MAIL_MONITOR_CLAUDE_TIMEOUT` (seconds to wait per message, default 180).
+
+**For each message that needs the model, the program makes this call once**:
 
 ```bash
 cd ~/.mail-monitor/claude-run          # an empty directory
-claude -p \
-  --model sonnet \
-  --system-prompt-file <triage prompt> \
-  --output-format json --json-schema '<schema for a batch of verdicts>' \
-  --tools "" --strict-mcp-config --disallowedTools "mcp__*" \
+claude -p --safe-mode \
+  --tools "" --strict-mcp-config \
   --permission-prompts none \
   --no-session-persistence \
-  < <this batch of mail>
+  --model sonnet --effort low \
+  --system-prompt-file <triage prompt> \
+  --output-format json \
+  < <this message's metadata, memory and body>
 ```
 
-The result is in the `structured_output` field of the returned JSON, already validated against the schema; the program matches results back to messages by number. Why each flag is there:
+The `result` field of the returned JSON holds the model's answer. The program extracts the JSON from it and runs the same Pydantic validation, retry and fallback as the API-key version. Why each flag is there:
 
 | Flag | Why |
 |---|---|
-| `--system-prompt-file` | Replaces Claude Code's default coding-assistant prompt entirely. The official guidance is to replace it for a pipeline nobody watches whose identity and permissions have nothing to do with coding. It also uses less of the allowance |
-| `--output-format json --json-schema` | Returns the result in our structure, in the `structured_output` field |
-| `--tools ""`, `--strict-mcp-config`, `--disallowedTools "mcp__*"` | No tools at all. This repository's `setup-claude-code.sh` installs the mail tools as a user-level MCP server; without these flags, the Claude reading your mail could call tools that send or change mail. Mail content is untrusted, so "one sentence in an email makes it forward the inbox" becomes a real risk |
-| `--permission-prompts none` | Nobody is at the computer to click "Allow", so any permission request is denied (needs Claude Code v2.1.259 or later) |
+| `--safe-mode` | Loads no CLAUDE.md, hooks, plugins, skills or MCP servers (available since v2.1.169). Your own `~/.claude/CLAUDE.md` stays out of the triage prompt, and your hooks do not run once per message |
+| `--tools ""`, `--strict-mcp-config` | No tools at all. This repository's `setup-claude-code.sh` installs the mail tools as a user-level MCP server; without these flags, the Claude reading your mail could call tools that send or change mail. Mail content is untrusted, so "one sentence in an email makes it forward the inbox" becomes a real risk |
+| `--permission-prompts none` | Nobody is at the computer to click "Allow", so any permission request is denied (needs v2.1.259 or later) |
 | `--no-session-persistence` | Keeps the session out of `~/.claude/projects/`, where it would otherwise be stored in plain text for 30 days, and the session is full of mail |
-| Run in an empty directory | Without `--bare`, `claude -p` runs the hooks of the project in the current directory and connects the servers in its `.mcp.json`, so it must not run in `~/mail-workspace` or the repository |
+| `--effort low` | Triage needs no long reasoning; this is faster and uses less of the allowance |
+| `--system-prompt-file` | Replaces Claude Code's default coding-assistant prompt entirely. The official guidance is to replace it for a pipeline nobody watches whose identity and permissions have nothing to do with coding. It also uses less of the allowance |
+| `--output-format json` | Answers and errors both come wrapped in one JSON object that is easy to parse |
+| Run in an empty directory | `claude -p` runs the hooks of the project in the current directory and connects the servers in its `.mcp.json`, so it must not run in `~/mail-workspace` or the repository |
 | No `--bare` | Bare mode ignores the subscription sign-in and only accepts `ANTHROPIC_API_KEY` |
+| `ANTHROPIC_API_KEY` removed | With this variable set, claude switches to the API key and per-token billing. The program removes it and `ANTHROPIC_AUTH_TOKEN` from the environment before each call |
 | Mail goes in on standard input | It never appears in the command line, so other programs cannot see it with `ps` |
 
-`mail-monitor doctor` will use `claude auth status` to check that the sign-in is a subscription (`authMethod` is `claude.ai`).
+**Two changes from the October 17 design**:
 
-**The cost of batching**: injected text in one message could sway the verdicts of the others in the same batch. With no tools to call, the worst case is a wrong verdict; each message is wrapped in a number and delimiters, and a message whose result is missing or does not match falls back to "unsure" and is still pushed.
+- **One call per message, no batching.** The plan was to put a round's messages into one batch and call once, to save allowance. Batching only saves the repeated prompt, and the price is that injected text in one message could sway the verdicts of the others in the batch. Now, as with the API-key version, each message gets its own call and the verdicts are independent; a round usually has zero to a few messages that need the model.
+- **No `--json-schema`.** Claude Code implements structured output with an internal tool (StructuredOutput), and this call turns every tool off; the official docs do not say whether the two work together reliably. So, as with the API-key version, the prompt asks for JSON only and the program validates it.
 
-### One switch for all of them (planned)
+**When something goes wrong**:
+
+| Situation | What the program does |
+|---|---|
+| claude is not signed in, or the sign-in expired | Stops calling claude for the rest of the round; mail the rules do not settle is pushed as "unsure" as usual; the `run` output and the log say to run claude in a terminal and type /login |
+| The subscription allowance is used up for now | Same; once the allowance resets, the next round works again |
+| claude is not found, or is too old | Same, with a hint to install Claude Code or run `claude update` |
+| Timeout (180 seconds by default) | Same; if it hangs once it will probably hang again, for example when the network is down, so the round stops waiting |
+| No JSON in the answer | One retry, then that message is pushed as "unsure" |
+
+`mail-monitor doctor` checks with `claude --version` and `claude auth status`: whether the version is new enough, and whether the sign-in is a subscription (`authMethod` is `claude.ai`, or `oauth_token` for a long-lived token from `claude setup-token`). An API-key sign-in or a third-party cloud (Bedrock and the like) is reported as an error.
+
+**Usage**: one call per message that needs a verdict. The input is the prompt, memory and the first 4,000 characters of the body; the output is a JSON object of a few hundred characters. It counts against your subscription and shares the allowance with your own use of Claude. To use less: write more rules (mail the rules settle never reaches the model), or switch the model to `haiku`.
+
+### Switching backends
 
 ```bash
-MAIL_MONITOR_LLM=api        # api (default) | chatgpt | claude
+MAIL_MONITOR_LLM=api        # api (default) | claude; chatgpt is not built yet
 ```
 
-Every backend only does "prompt in, JSON out", behind one interface in the code: `chat_json(system, user) -> dict`. The prompt, output structure, Pydantic validation, retry and fallback all live in the verdict layer and are shared, so `classify.py` does not change. Tests use a fake `claude` command and a fake Responses endpoint, with no real account.
+Both backends sit behind one interface in the code, `chat_json(system, user) -> dict`: the API-key version in `llm.py`, the Claude subscription version in `claude_cli.py`. The prompt, output structure, Pydantic validation, retry and fallback all live in the verdict layer (`classify.py`) and are shared; the only new thing the verdict layer knows is that errors such as "not signed in" or "allowance used up" are not worth retrying. Tests use a fake `claude` command (`tests/fake_claude.py`), with no real account.
 
 ## Where your data goes
 
@@ -143,8 +169,8 @@ Before sending an institutional mailbox (a university account, say) to an outsid
 
 Putting it last keeps the earlier rules (verification codes, newsletters) working for that mailbox too.
 
-## Sources (checked 2026-10-17)
+## Sources (checked 2026-10-17; the Claude part rechecked 2026-10-27)
 
-- Claude Code: [Legal and compliance (authentication and credential use)](https://code.claude.com/docs/en/legal-and-compliance), [Run Claude Code programmatically](https://code.claude.com/docs/en/headless), [CLI reference](https://code.claude.com/docs/en/cli-reference), [Data usage](https://code.claude.com/docs/en/data-usage), [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
+- Claude Code: [Legal and compliance (authentication and credential use)](https://code.claude.com/docs/en/legal-and-compliance), [Run Claude Code programmatically](https://code.claude.com/docs/en/headless), [CLI reference](https://code.claude.com/docs/en/cli-reference), [Data usage](https://code.claude.com/docs/en/data-usage), [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview), [Structured outputs](https://code.claude.com/docs/en/agent-sdk/structured-outputs), [v2.1.169 release notes (--safe-mode)](https://github.com/anthropics/claude-code/releases/tag/v2.1.169)
 - OpenAI: [Integrating Sign in with ChatGPT in your open-source app](https://developers.openai.com/cookbook/articles/sign-in-with-chatgpt), [ChatGPT plan usage overview](https://developers.openai.com/siwc/token-sharing-open-source), [Registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in), [Models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference), [Preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations), [Help center: using your ChatGPT plan in other apps and sites](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites), [Codex non-interactive mode](https://developers.openai.com/codex/noninteractive)
 - DeepSeek: [Change log](https://api-docs.deepseek.com/updates/), [Models and pricing](https://api-docs.deepseek.com/quick_start/pricing/), [Thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/), [Privacy policy](https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html)

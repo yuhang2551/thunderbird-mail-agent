@@ -1,18 +1,24 @@
 """LLM 调用：OpenAI 兼容的 chat/completions 接口（默认 DeepSeek），只用 JSON 模式。
 
+判断层只依赖 ChatClient 这一个接口：提示词进、JSON 对象出。Claude 订阅版在 claude_cli.py，实现的是同一个接口。
+
 故意不引入厂商 SDK：一个 POST 就够，换模型只改 base_url 和 model。各家的私有参数（比如 DeepSeek 的思考开关）走 extra_body。
 """
 from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 
 
 class LLMError(RuntimeError):
     pass
+
+
+class ChatClient(Protocol):
+    async def chat_json(self, system: str, user: str) -> dict[str, Any]: ...
 
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)

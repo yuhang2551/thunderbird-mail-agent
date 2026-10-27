@@ -9,6 +9,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from .claude_cli import ClaudeCLIClient
 from .classify import Classifier, FallbackClassifier, LLMClassifier
 from .config import Settings
 from .llm import LLMClient
@@ -53,6 +54,11 @@ class RunReport:
 
 
 def make_classifier(settings: Settings) -> Classifier:
+    if settings.llm_backend == "claude":
+        claude = ClaudeCLIClient(
+            binary=settings.claude_bin, model=settings.claude_model, timeout=settings.claude_timeout, workdir=settings.claude_workdir
+        )
+        return LLMClassifier(claude, timezone=settings.timezone, body_chars=settings.llm_body_chars, profile=settings.profile)
     if settings.llm_enabled:
         client = LLMClient(
             api_key=settings.llm_api_key or "",
@@ -136,6 +142,9 @@ async def run_once(
                 if rule:
                     decision = rule.apply_overrides(decision)
                 decided.append((header, decision, rule))
+            model_error = getattr(classifier, "model_error", None)
+            if model_error:
+                report.errors.append(f"模型这一轮用不了，改按「拿不准」推送：{model_error}")
 
             decided.sort(key=lambda item: item[0].date or datetime.min.replace(tzinfo=timezone.utc))
             for header, decision, rule in decided:

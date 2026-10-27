@@ -22,7 +22,7 @@ It **only reads mail; it never sends or deletes**. The one action that writes to
 | Doc | Contents |
 |---|---|
 | [Architecture](docs/architecture_EN.md) | The parts, one check from start to finish, how a verdict is made, memory, design choices, where data goes, safety boundaries |
-| [Model backends](docs/model-backends_EN.md) | The API-key version (works today) and the ChatGPT / Claude subscription version (designed, not yet built): each vendor's rules, cost and data handling |
+| [Model backends](docs/model-backends_EN.md) | The API-key version and the Claude subscription version (both work today) and the ChatGPT subscription version (designed, not yet built): setup, each vendor's rules, cost and data handling |
 | [FAQ and troubleshooting](docs/faq_EN.md) | Install problems, no connection, no push, too many or too few pushes |
 
 ## Install
@@ -33,7 +33,7 @@ Prerequisites: steps 1–3 of the main README are done (Thunderbird signed in to
 cd ~/thunderbird-mail-agent/monitor
 ./scripts/install.sh     # creates .venv, installs dependencies, writes ~/.mail-monitor/.env and rules.yaml (needs Python 3.10+)
 source .venv/bin/activate
-# then edit ~/.mail-monitor/.env (DEEPSEEK_API_KEY, optional; keep push on console at first) and adjust ~/.mail-monitor/rules.yaml
+# then edit ~/.mail-monitor/.env (pick a model: DEEPSEEK_API_KEY, or MAIL_MONITOR_LLM=claude for a Claude subscription; both optional; keep push on console at first) and adjust ~/.mail-monitor/rules.yaml
 
 mail-monitor doctor      # self-check: can it reach Thunderbird, which inboxes, are push and model configured. Changes nothing
 mail-monitor init        # first run: register existing mail as seen so old mail is not pushed
@@ -69,7 +69,7 @@ On Linux use cron:
 
 | Item | Environment variable | Notes |
 |---|---|---|
-| Model | `DEEPSEEK_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_EXTRA_BODY` | Any OpenAI-compatible endpoint; by default DeepSeek's `deepseek-flash`, with its default thinking mode turned off. Works without a key: mail the rules do not settle is pushed as "unsure". For using a ChatGPT / Claude subscription instead of a key, see [Model backends](docs/model-backends_EN.md) |
+| Model | `MAIL_MONITOR_LLM`, `DEEPSEEK_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_EXTRA_BODY`, `MAIL_MONITOR_CLAUDE_MODEL` | `api` (default) calls any OpenAI-compatible endpoint; by default DeepSeek's `deepseek-flash`, with its default thinking mode turned off. `claude` runs the Claude Code already signed in on your Mac and uses your Claude Pro / Max subscription, no key needed; the model defaults to `sonnet`. Works with neither: mail the rules do not settle is pushed as "unsure". See [Model backends](docs/model-backends_EN.md) |
 | Profile | `MAIL_MONITOR_PROFILE` | One sentence about you (what you study, what job you are looking for, who your advisor is), added to the prompt. Without it the model only knows "a graduate student who is also job hunting" |
 | Push | `MAIL_MONITOR_NOTIFY` = `console` / `lark_app` / `lark_webhook` | Start with `console` to watch it in the terminal. An app bot needs `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_RECEIVE_ID`; a group custom bot only needs `LARK_WEBHOOK_URL` (optional `LARK_WEBHOOK_SECRET`) |
 | Rules | `MAIL_MONITOR_RULES` (default `~/.mail-monitor/rules.yaml`) | See [rules.example.yaml](rules.example.yaml) |
@@ -164,7 +164,7 @@ Use it for a week or two and label a few dozen messages and you have numbers for
 ## Development
 
 ```bash
-pytest            # tests/fake_server.py stands in for thunderbird-mcp, so no Thunderbird is needed
+pytest            # tests/fake_server.py stands in for thunderbird-mcp and fake_claude.py for claude, so no Thunderbird or account is needed
 ```
 
 | Path | Contents |
@@ -172,12 +172,12 @@ pytest            # tests/fake_server.py stands in for thunderbird-mcp, so no Th
 | `mail_monitor/mailbox.py` | Mail layer: MCP client that starts `mcp-bridge.cjs` and wraps the 5 tools the monitor needs |
 | `mail_monitor/rules.py` | Rules layer: YAML rules evaluated before the model |
 | `mail_monitor/memory.py`, `state.py` | Memory: handled mail, sender identities, thread history and your labels, all in SQLite |
-| `mail_monitor/classify.py`, `llm.py` | Verdicts: prompt, fixed-schema JSON output, Pydantic validation, fallback |
+| `mail_monitor/classify.py`, `llm.py`, `claude_cli.py` | Verdicts: prompt, fixed-schema JSON output, Pydantic validation, fallback; `llm.py` is the API-key version, `claude_cli.py` the Claude subscription version |
 | `mail_monitor/pipeline.py` | One complete check from fetch to record |
 | `mail_monitor/notify.py`, `render.py` | Push: console / group-bot webhook / app bot; message text |
 | `mail_monitor/cli.py` | Command line |
 | `scripts/` | `install.sh` (environment), `launchd.sh` (scheduling) |
-| `tests/` | The fake thunderbird-mcp (`fake_server.py`), a bridge whose Thunderbird is closed (`dead_bridge.py`) and 49 tests |
+| `tests/` | The fake thunderbird-mcp (`fake_server.py`), a bridge whose Thunderbird is closed (`dead_bridge.py`), a fake `claude` command (`fake_claude.py`) and 67 tests |
 | `docs/` | Architecture, model backends, FAQ |
 
 `tests/fake_server.py` copies the tool names, parameters and return shapes of upstream v0.9.2, so the whole pipeline runs in the cloud or in CI; switching to the real bridge is only a different start command.

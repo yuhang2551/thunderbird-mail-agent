@@ -22,7 +22,7 @@ launchd 每 5 分钟 ──► mail-monitor run
 | 文档 | 内容 |
 |---|---|
 | [架构说明](docs/architecture.md) | 由哪几块组成、一次巡检的全过程、判断链路、记忆、设计取舍、数据去向、安全边界 |
-| [模型后端](docs/model-backends.md) | API key 版（现在能用）和 ChatGPT / Claude 订阅版（设计已定，代码还没写）：两家的规则、费用、数据去向 |
+| [模型后端](docs/model-backends.md) | API key 版和 Claude 订阅版（都能用）、ChatGPT 订阅版（设计已定，代码还没写）：怎么配、两家的规则、费用、数据去向 |
 | [常见问题和排错](docs/faq.md) | 装不上、连不上、收不到推送、推得太多或太少 |
 
 ## 安装
@@ -33,7 +33,7 @@ launchd 每 5 分钟 ──► mail-monitor run
 cd ~/thunderbird-mail-agent/monitor
 ./scripts/install.sh     # 建 .venv、装依赖、生成 ~/.mail-monitor/.env 和 rules.yaml（需要 Python 3.10+）
 source .venv/bin/activate
-# 然后编辑 ~/.mail-monitor/.env：填 DEEPSEEK_API_KEY（不填也能跑），推送先保持 console；按自己的情况改 ~/.mail-monitor/rules.yaml
+# 然后编辑 ~/.mail-monitor/.env：选模型（填 DEEPSEEK_API_KEY，或者设 MAIL_MONITOR_LLM=claude 用 Claude 订阅；都不配也能跑），推送先保持 console；按自己的情况改 ~/.mail-monitor/rules.yaml
 
 mail-monitor doctor      # 自检：连得上 Thunderbird 吗、有哪些收件箱、推送和模型配好没
 mail-monitor init        # 首次运行：把现有邮件登记为已见，不推送旧邮件
@@ -69,7 +69,7 @@ Linux 用 cron：
 
 | 项 | 环境变量 | 说明 |
 |---|---|---|
-| 模型 | `DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_EXTRA_BODY` | OpenAI 兼容接口，默认 DeepSeek 的 `deepseek-flash`，并关掉它默认打开的思考模式。没有 key 也能跑：规则没覆盖的邮件一律按"拿不准"推送。用 ChatGPT / Claude 订阅代替 key 的版本见[模型后端](docs/model-backends.md) |
+| 模型 | `MAIL_MONITOR_LLM`、`DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_EXTRA_BODY`、`MAIL_MONITOR_CLAUDE_MODEL` | `api`（默认）走 OpenAI 兼容接口，默认 DeepSeek 的 `deepseek-flash`，并关掉它默认打开的思考模式。`claude` 调你 Mac 上已登录的 Claude Code，用 Claude Pro / Max 订阅，不用 key，模型默认 `sonnet`。都不配也能跑：规则没覆盖的邮件一律按"拿不准"推送。详见[模型后端](docs/model-backends.md) |
 | 画像 | `MAIL_MONITOR_PROFILE` | 一句话介绍你自己（在读什么、找什么工作、导师是谁），写进提示词；不填时模型只知道"在读研究生，同时在找工作" |
 | 推送 | `MAIL_MONITOR_NOTIFY` = `console` / `lark_app` / `lark_webhook` | 先用 `console` 在终端里看效果。应用机器人要 `LARK_APP_ID`、`LARK_APP_SECRET`、`LARK_RECEIVE_ID`；群自定义机器人只要 `LARK_WEBHOOK_URL`（可选 `LARK_WEBHOOK_SECRET`） |
 | 规则 | `MAIL_MONITOR_RULES`（默认 `~/.mail-monitor/rules.yaml`） | 见 [rules.example.yaml](rules.example.yaml) |
@@ -164,7 +164,7 @@ Agent 项目没有数字站不住脚，所以带了一个最小的评测闭环�
 ## 开发
 
 ```bash
-pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp，不需要 Thunderbird
+pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp、fake_claude.py 模拟 claude，不需要 Thunderbird 和账号
 ```
 
 | 路径 | 内容 |
@@ -172,12 +172,12 @@ pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp，不需要 
 | `mail_monitor/mailbox.py` | 邮件层：MCP 客户端，启动 `mcp-bridge.cjs`，只封装监控要用的 5 个工具 |
 | `mail_monitor/rules.py` | 规则层：YAML 规则，先于模型执行 |
 | `mail_monitor/memory.py`、`state.py` | 记忆：SQLite 里的已处理邮件、发件人身份、同一话题的历史、你的标注 |
-| `mail_monitor/classify.py`、`llm.py` | 判断：提示词、固定 schema 的 JSON 输出、Pydantic 校验、保底 |
+| `mail_monitor/classify.py`、`llm.py`、`claude_cli.py` | 判断：提示词、固定 schema 的 JSON 输出、Pydantic 校验、保底；`llm.py` 是 API key 版，`claude_cli.py` 是 Claude 订阅版 |
 | `mail_monitor/pipeline.py` | 一次巡检的全过程 |
 | `mail_monitor/notify.py`、`render.py` | 推送：终端 / 群机器人 webhook / 应用机器人；推送文本 |
 | `mail_monitor/cli.py` | 命令行 |
 | `scripts/` | `install.sh`（装环境）、`launchd.sh`（定时任务） |
-| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）、Thunderbird 没开时的 bridge（`dead_bridge.py`）和 49 个测试 |
+| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）、Thunderbird 没开时的 bridge（`dead_bridge.py`）、假的 claude 命令（`fake_claude.py`）和 67 个测试 |
 | `docs/` | 架构说明、模型后端、常见问题 |
 
 `tests/fake_server.py` 照抄上游 v0.9.2 的工具名、参数和返回结构，所以能在云端或 CI 里跑通整条流水线；换成真 bridge 只是换一个启动命令。

@@ -15,17 +15,19 @@ PREFIX="com.thunderbird-mail-agent.mail-monitor"
 RUN_INTERVAL="${RUN_INTERVAL:-300}"
 DIGEST_HOURS="${DIGEST_HOURS:-9 18}"
 NODE_DIR="$(dirname "$(command -v node 2>/dev/null || echo /usr/local/bin/node)")"
+# Claude 订阅版（MAIL_MONITOR_LLM=claude）要调用 claude；官方安装器默认装在 ~/.local/bin
+CLAUDE_DIR="$(dirname "$(command -v claude 2>/dev/null || echo "$HOME/.local/bin/claude")")"
 DOMAIN="gui/$(id -u)"
 
 die() { echo "❌ $*" >&2; exit 1; }
 [ "$(uname)" = "Darwin" ] || die "launchd 只有 macOS 有。Linux 请用 cron，README 里有例子"
 
-# 每个任务共用的环境：PATH 里要有 node（bridge 用），配置文件固定指向 HOME_DIR/.env
+# 每个任务共用的环境：PATH 里要有 node（bridge 用）和 claude（Claude 订阅版用），配置文件固定指向 HOME_DIR/.env
 env_xml() {
   cat <<XML
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$NODE_DIR:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>$NODE_DIR:$CLAUDE_DIR:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
     <key>HOME</key><string>$HOME</string>
     <key>PYTHONUTF8</key><string>1</string>
     <key>MAIL_MONITOR_ENV</key><string>$HOME_DIR/.env</string>

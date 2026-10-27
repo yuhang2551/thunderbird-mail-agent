@@ -70,7 +70,7 @@ DeepSeek retired `deepseek-chat` and `deepseek-reasoner` on 2026-07-24. Set `LLM
 
 **A push ends with "没有模型判断，按「拿不准」推送" (no model verdict, pushed as unsure)**
 
-That message never went through the model: either `.env` has no key, or the model failed twice in a row. Look for "LLM 判断失败" (LLM verdict failed) in the log. Common DeepSeek cases:
+That message never went through the model: either `.env` has neither a key nor the Claude subscription version turned on, or the model failed. The output of `mail-monitor run` and the "LLM 判断失败" (LLM verdict failed) lines in the log say why. Common DeepSeek cases:
 
 | Error | Cause |
 |---|---|
@@ -80,9 +80,21 @@ That message never went through the model: either `.env` has no key, or the mode
 | HTTP 429 | Requests too fast |
 | The model returned no JSON | Happens occasionally and one retry usually fixes it; if it keeps happening, share the log |
 
-**Another provider, a local model, or a ChatGPT / Claude subscription instead of an API key**
+**With the Claude subscription version, doctor says claude is not signed in, or is using an API key**
 
-See [Model backends](model-backends_EN.md). The subscription version is designed but not yet built.
+Run `claude` in a terminal, type `/login`, sign in with your Claude account (Pro / Max), then run `mail-monitor doctor` again. An API-key sign-in is billed per token and does not count as the subscription.
+
+**With the Claude subscription version, the log says the allowance is used up**
+
+The allowance is shared with your own use of Claude. While it is used up, mail the rules do not settle is still pushed as "unsure", so nothing is missed; once the allowance resets it works again. To use less: write more rules, or set `MAIL_MONITOR_CLAUDE_MODEL=haiku` in `.env`.
+
+**It works in the terminal, but under launchd it cannot find claude**
+
+launchd has a different PATH from your terminal. Find the full path with `which claude` and put it in `MAIL_MONITOR_CLAUDE_BIN` in `.env`, or run `./scripts/launchd.sh install` again, which writes the directory claude is in at that moment into PATH.
+
+**Another provider, a local model, or a ChatGPT subscription instead of an API key**
+
+See [Model backends](model-backends_EN.md). The ChatGPT subscription version is designed but not yet built.
 
 ## Running on a schedule
 

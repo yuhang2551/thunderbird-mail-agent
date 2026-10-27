@@ -15,7 +15,7 @@
 | 部分 | 在这里是什么 | 代码 |
 |---|---|---|
 | 感知 | 通过 MCP 调 Thunderbird 扩展的工具，拿到新邮件的标题和正文 | `mailbox.py` |
-| 决策 | 规则先过一遍；规则没定性的交给模型，模型只输出固定字段的 JSON，校验过才用 | `rules.py`、`classify.py`、`llm.py` |
+| 决策 | 规则先过一遍；规则没定性的交给模型，模型只输出固定字段的 JSON，校验过才用 | `rules.py`、`classify.py`、`llm.py`、`claude_cli.py` |
 | 记忆 | SQLite：处理过哪些邮件、每个发件人是谁、同一话题之前说了什么、你标的答案 | `state.py`、`memory.py` |
 | 行动 | 默认只读。唯一的写操作是给"要管"的邮件打标签，默认关；永远不发信、不删信 | `pipeline.py` |
 | 推送 | 即时消息和早晚汇总，发到终端、Lark 群机器人或 Lark 应用机器人 | `notify.py`、`render.py` |
@@ -32,7 +32,7 @@ flowchart LR
         M <--> D[("SQLite<br/>state.db")]
         R["rules.yaml"] --> M
     end
-    M -->|"规则没定性的邮件"| A["模型<br/>默认 DeepSeek"]
+    M -->|"规则没定性的邮件"| A["模型<br/>DeepSeek API 或 Claude 订阅"]
     M -->|"一句话摘要"| K["Lark / 飞书"]
 ```
 
@@ -169,7 +169,7 @@ flowchart TD
 |---|---|
 | 邮件本身 | 你电脑上的 Thunderbird。程序不另存正文 |
 | 判断记录、发件人身份、你的标注 | 本机的 `~/.mail-monitor/state.db`，只有标题和一句话摘要 |
-| 规则没定性的邮件：发件人、收件人、主题、时间、正文前 4000 字、相关记忆、你的画像 | 你配置的模型，默认 DeepSeek。各后端的区别见 [模型后端](model-backends.md#数据去哪了) |
+| 规则没定性的邮件：发件人、收件人、主题、时间、正文前 4000 字、相关记忆、你的画像 | 你配置的模型：API key 版默认发给 DeepSeek，Claude 订阅版发给 Anthropic。各后端的区别见 [模型后端](model-backends.md#数据去哪了) |
 | 规则直接定性的邮件（验证码、订阅等） | 不发给任何模型 |
 | 推送：谁、什么事、期限、建议、主题和时间 | Lark。不含正文；没有模型判断时，"什么事"是主题加预览的前 80 个字 |
 | API key、Lark 凭证 | `~/.mail-monitor/.env`，`install.sh` 生成时权限设成 600，不进仓库 |

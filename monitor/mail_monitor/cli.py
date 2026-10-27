@@ -10,6 +10,7 @@ from pathlib import Path
 import typer
 
 from . import __version__
+from .claude_cli import doctor_lines as claude_doctor_lines
 from .config import RETIRED_MODELS, Settings, load_settings
 from .mailbox import Mailbox, MailboxError
 from .models import MessageHeader
@@ -81,7 +82,12 @@ def doctor() -> None:
         ok = False
         typer.echo(f"❌ 规则文件有问题：{exc}")
 
-    if settings.llm_enabled:
+    if settings.llm_backend == "claude":
+        claude_ok, lines = claude_doctor_lines(settings.claude_bin, settings.claude_model)
+        ok = ok and claude_ok
+        for line in lines:
+            typer.echo(line)
+    elif settings.llm_enabled:
         typer.echo(f"✅ 模型：{settings.llm_model} @ {settings.llm_base_url}")
         if settings.llm_model in RETIRED_MODELS and "deepseek.com" in settings.llm_base_url:
             ok = False
@@ -89,7 +95,7 @@ def doctor() -> None:
         if settings.resolved_llm_extra_body:
             typer.echo(f"   请求里额外带上：{json.dumps(settings.resolved_llm_extra_body, ensure_ascii=False)}")
     else:
-        typer.echo("⚠️  没有 LLM key（DEEPSEEK_API_KEY）：规则没覆盖的邮件会按「拿不准」全部推送")
+        typer.echo("⚠️  没有 LLM key（DEEPSEEK_API_KEY），也没开 Claude 订阅版（MAIL_MONITOR_LLM=claude）：规则没覆盖的邮件会按「拿不准」全部推送")
     if settings.profile:
         typer.echo(f"✅ 画像：{settings.profile}")
     else:
