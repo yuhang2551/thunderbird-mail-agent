@@ -24,6 +24,7 @@ launchd 每 5 分钟 ──► mail-monitor run
 | [架构说明](docs/architecture.md) | 由哪几块组成、一次巡检的全过程、判断链路、记忆、设计取舍、数据去向、安全边界 |
 | [模型后端](docs/model-backends.md) | API key 版和 Claude 订阅版（都能用）、ChatGPT 订阅版（设计已定，代码还没写）：怎么配、两家的规则、费用、数据去向 |
 | [常见问题和排错](docs/faq.md) | 装不上、连不上、收不到推送、推得太多或太少 |
+| [更新记录](CHANGELOG.md) | 按增量记录：每一段做了什么、真机实测结果、下一段做什么 |
 
 ## 安装
 

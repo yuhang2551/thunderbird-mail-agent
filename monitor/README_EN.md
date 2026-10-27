@@ -24,6 +24,7 @@ It **only reads mail; it never sends or deletes**. The one action that writes to
 | [Architecture](docs/architecture_EN.md) | The parts, one check from start to finish, how a verdict is made, memory, design choices, where data goes, safety boundaries |
 | [Model backends](docs/model-backends_EN.md) | The API-key version and the Claude subscription version (both work today) and the ChatGPT subscription version (designed, not yet built): setup, each vendor's rules, cost and data handling |
 | [FAQ and troubleshooting](docs/faq_EN.md) | Install problems, no connection, no push, too many or too few pushes |
+| [Changelog](CHANGELOG_EN.md) | Increment by increment: what each step added, real-machine test results, what comes next |
 
 ## Install
 
