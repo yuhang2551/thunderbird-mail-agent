@@ -6,10 +6,27 @@
 
 ## 下一段
 
-1. 把推送单独做成本机通知网关 [notify-hub](https://github.com/yuhang2551/notify-hub)（分级、夜里免打扰、去重、失败重发），邮件监控改成通过它推送。
-2. `mail-monitor init` 把现有邮件登记为已见，装 launchd 定时任务，真正跑起来。
+1. 在 Mac 上 `git pull`，`.env` 里的推送改成 `notify_hub`，`mail-monitor notify-test` 发到手机上。
+2. `mail-monitor init` 把现有邮件登记为已见，装 launchd 定时任务，真正跑起来。多久巡检一次到时候再定（脚本现在默认每 5 分钟）。
 3. 用一周：`review` 标注、`eval` 看漏推率和噪声率，按结果调规则和提示词。
 4. ChatGPT 订阅版（做法已写在[模型后端](docs/model-backends.md)里，先不急）。
+
+## 2026-10-27 · 推送可以交给 notify-hub
+
+**新增**
+
+- 新的推送方式 `MAIL_MONITOR_NOTIFY=notify_hub`：即时推送和早晚汇总都交给本机的通知网关 [notify-hub](https://github.com/yuhang2551/notify-hub)，Lark 凭证、夜里免打扰、去重、限流、失败重发归它管。终端、群机器人、应用机器人三种照旧能用。
+- 每条推送除了纯文本，还带着卡片用的标题、正文和级别。即时推送的标题是「谁：什么事」，手机通知里一眼能看到；汇总是一张「邮件汇总 · N 封」的卡。
+- 级别：规则里写了 `urgency: high` 的（比如导师）按紧急发，夜里也推；其余按普通发，免打扰时段先存着，结束后合成一张卡。模型判断的紧急只写在卡片上，不在夜里叫醒人。
+- 每封邮件带着自己的 id 交给 notify-hub，万一同一封交了两次也只推一次。
+- notify-hub 没装、找不到命令或者 60 秒没返回时，这封邮件转进汇总，不会丢。PATH 里找不到时会去 `~/.local/bin` 找，也可以用 `MAIL_MONITOR_NOTIFY_HUB_BIN` 写完整路径。
+- `doctor` 显示 notify-hub 的版本；`notify-test` 按紧急发（测试消息不该被免打扰攒着），并把 notify-hub 的回答原样打出来。
+- 测试 99 个，用假的 notify-hub 命令。
+
+**验证到哪一步**
+
+- 在云端用真的 notify-hub（推到终端，不推 Lark）跑了一遍完整巡检：导师的邮件按紧急发出，其余的在免打扰时段被 notify-hub 存了起来。
+- 还没在 Mac 上接真的 Lark 试，见下一段第 1 步。
 
 ## 2026-10-27 · Lark 推送测通
 

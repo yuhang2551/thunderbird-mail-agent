@@ -6,10 +6,27 @@ Recorded increment by increment: what each step added, how far it was verified o
 
 ## Next
 
-1. Turn push into its own local notification gateway, [notify-hub](https://github.com/yuhang2551/notify-hub) (levels, quiet hours at night, deduplication, retries), and have the mail monitor push through it.
-2. Mark existing mail as seen with `mail-monitor init`, install the launchd jobs, and let it run for real.
+1. On the Mac, `git pull`, switch push in `.env` to `notify_hub`, and get `mail-monitor notify-test` onto the phone.
+2. Mark existing mail as seen with `mail-monitor init`, install the launchd jobs, and let it run for real. How often to check is decided then (the script currently defaults to every 5 minutes).
 3. Use it for a week: label with `review`, check the miss and noise rates with `eval`, and tune the rules and prompt from the results.
 4. The ChatGPT subscription version (designed in [Model backends](docs/model-backends_EN.md), not urgent).
+
+## 2026-10-27 · Pushes can go through notify-hub
+
+**Added**
+
+- A new push option, `MAIL_MONITOR_NOTIFY=notify_hub`: instant pushes and the morning and evening digest are handed to the local notification gateway [notify-hub](https://github.com/yuhang2551/notify-hub), which owns the Lark credentials, quiet hours at night, deduplication, rate limiting and retries. The terminal, group bot and app bot options still work.
+- Besides its plain text, every push now carries a card title, body and level. An instant push is titled "who: what", readable at a glance in the phone notification; the digest is one "邮件汇总 · N 封" (mail digest · N messages) card.
+- Levels: rules with `urgency: high` (your advisor, say) are sent as urgent and delivered at night too; everything else is normal, held during quiet hours and sent as one combined card when they end. A model-judged "urgent" is shown on the card but does not wake you at night.
+- Each mail is handed to notify-hub with its own id, so even if the same mail were handed over twice it would be pushed once.
+- If notify-hub is not installed, cannot be found or gives no answer within 60 seconds, the mail moves into the digest and is not lost. When the command is not on PATH it is looked up in `~/.local/bin`, or `MAIL_MONITOR_NOTIFY_HUB_BIN` can give the full path.
+- `doctor` shows the notify-hub version; `notify-test` sends as urgent (a test message should not be held by quiet hours) and prints notify-hub's answer as is.
+- 99 tests, using a fake notify-hub command.
+
+**How far it was verified**
+
+- In the cloud, one full check ran against the real notify-hub (pushing to the terminal, not to Lark): the advisor's mail went out as urgent, and the rest was held by notify-hub during quiet hours.
+- Not yet tried on the Mac with real Lark; that is step 1 of Next.
 
 ## 2026-10-27 · Lark push working
 

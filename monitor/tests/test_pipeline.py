@@ -101,6 +101,8 @@ rules:
     assert rows["<seminar-1@example.edu>"]["notify_mode"] == "digest"
     assert report.pushed == 2 and report.digest_pending == 3 and report.ignored == 1
     assert report.tagged == 2  # 两封"需要处理"的打了标签
+    levels = {push.key: push.level for push in notifier.pushes}
+    assert levels == {"<prof-1@example.edu>": "urgent", "<hr-1@quantfirm.example>": "normal"}  # 规则写了 urgency: high 才算紧急
 
     digest_count = await send_digest(settings, state=state, notifier=notifier)
     assert digest_count == 3

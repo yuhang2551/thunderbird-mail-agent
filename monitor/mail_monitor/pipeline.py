@@ -17,7 +17,7 @@ from .mailbox import Mailbox, MailboxError
 from .memory import recall
 from .models import Decision, MessageHeader
 from .notify import ConsoleNotifier, Notifier, NotifyError, build_notifier
-from .render import render_digest, render_instant
+from .render import digest_push, instant_push
 from .rules import Rule, RuleSet
 from .state import State
 
@@ -198,8 +198,11 @@ async def _settle(
     mode = decision.notify_mode
     pushed = False
     if mode == "instant":
+        # 只有规则里写明 urgency: high 的（比如导师）按紧急推，夜里也发；模型判断的紧急只写在消息里，
+        # 免打扰时段先攒着（notify-hub 管这个）
+        urgent = rule is not None and rule.then.urgency == "high"
         try:
-            await notifier.send(render_instant(header, decision, settings.timezone))
+            await notifier.send(instant_push(header, decision, settings.timezone, urgent=urgent))
             pushed = True
             report.pushed += 1
         except NotifyError as exc:
@@ -220,7 +223,7 @@ async def send_digest(settings: Settings, *, notifier: Notifier | None = None, s
     rows = state.pending_digest()
     if not rows:
         return 0
-    await notifier.send(render_digest(rows, timezone_name=settings.timezone))
+    await notifier.send(digest_push(rows, timezone_name=settings.timezone))
     state.mark_digested([row["id"] for row in rows])
     return len(rows)
 

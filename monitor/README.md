@@ -72,7 +72,7 @@ Linux 用 cron：
 |---|---|---|
 | 模型 | `MAIL_MONITOR_LLM`、`DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_EXTRA_BODY`、`MAIL_MONITOR_CLAUDE_MODEL` | `api`（默认）走 OpenAI 兼容接口，默认 DeepSeek 的 `deepseek-flash`，并关掉它默认打开的思考模式。`claude` 调你 Mac 上已登录的 Claude Code，用 Claude Pro / Max 订阅，不用 key，模型默认 `sonnet`。都不配也能跑：规则没覆盖的邮件一律按"拿不准"推送。详见[模型后端](docs/model-backends.md) |
 | 画像 | `MAIL_MONITOR_PROFILE` | 一句话介绍你自己（在读什么、找什么工作、导师是谁），写进提示词；不填时模型只知道"在读研究生，同时在找工作" |
-| 推送 | `MAIL_MONITOR_NOTIFY` = `console` / `lark_app` / `lark_webhook` | 先用 `console` 在终端里看效果。应用机器人要 `LARK_APP_ID`、`LARK_APP_SECRET`、`LARK_RECEIVE_ID`；群自定义机器人只要 `LARK_WEBHOOK_URL`（可选 `LARK_WEBHOOK_SECRET`） |
+| 推送 | `MAIL_MONITOR_NOTIFY` = `console` / `notify_hub` / `lark_app` / `lark_webhook` | 先用 `console` 在终端里看效果。装了 [notify-hub](https://github.com/yuhang2551/notify-hub) 的用 `notify_hub`，Lark 的配置都在它那里，这边不用填（找不到命令时用 `MAIL_MONITOR_NOTIFY_HUB_BIN` 写完整路径）。直接推的话，应用机器人要 `LARK_APP_ID`、`LARK_APP_SECRET`、`LARK_RECEIVE_ID`；群自定义机器人只要 `LARK_WEBHOOK_URL`（可选 `LARK_WEBHOOK_SECRET`） |
 | 规则 | `MAIL_MONITOR_RULES`（默认 `~/.mail-monitor/rules.yaml`） | 见 [rules.example.yaml](rules.example.yaml) |
 | 账号 | `MAIL_MONITOR_ACCOUNTS` | 只看某些账号；默认全部收件箱 |
 | 行动 | `MAIL_MONITOR_ACTION_TAG` | 给"需要处理"的邮件打标签，默认 `false` |
@@ -81,11 +81,18 @@ Linux 用 cron：
 
 ### 推送接到飞书 / Lark
 
-两条路，选一条：
+三条路，选一条：
 
-**A. 群自定义机器人（最省事，但有的租户没开）**：电脑端 Lark 打开一个群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制 webhook。写进 `.env`：`MAIL_MONITOR_NOTIFY=lark_webhook`、`LARK_WEBHOOK_URL=…`、可选 `LARK_WEBHOOK_SECRET=…`（签名校验）。
+**A. 交给 notify-hub（推荐）**：[notify-hub](https://github.com/yuhang2551/notify-hub) 是本机的通知网关，Lark 凭证、夜里免打扰、去重、失败重发都在它那里配一次，邮件监控只管把消息交给它。先按它的 README 装好，`notify-hub test` 能在手机上收到；再在 `.env` 里写 `MAIL_MONITOR_NOTIFY=notify_hub`，`mail-monitor doctor` 显示出 notify-hub 的版本就接上了。这时：
 
-**B. 应用机器人（用开发者后台，可以直接私聊你）**：
+- 每条即时推送是一张卡片，标题是「谁：什么事」，手机通知里一眼就能看到。
+- 规则里写了 `urgency: high` 的（比如导师）按紧急发：红色卡片，夜里也推。其余的，包括模型判断为紧急的，在免打扰时段（默认 23:00–08:00）先存着，08:00 合成一张卡发。
+- 早晚汇总照旧由 `mail-monitor digest` 发，是一张「邮件汇总 · N 封」的卡片。
+- 发不出去的消息留在 notify-hub 的发件箱里自动重发；notify-hub 本身运行不了（没装、找不到命令）时，这封邮件转进汇总，和直接推一样不会丢。
+
+**B. 群自定义机器人（最省事，但有的租户没开）**：电脑端 Lark 打开一个群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制 webhook。写进 `.env`：`MAIL_MONITOR_NOTIFY=lark_webhook`、`LARK_WEBHOOK_URL=…`、可选 `LARK_WEBHOOK_SECRET=…`（签名校验）。
+
+**C. 应用机器人（用开发者后台，可以直接私聊你）**：
 
 1. [open.larksuite.com](https://open.larksuite.com)（飞书用 open.feishu.cn）→ 开发者后台 → 创建企业自建应用，起个名字。已经有自己的应用（比如一个 bridge 机器人）的话直接复用，跳到第 3 步。
 2. 应用页 → 添加应用能力 → **机器人**。
@@ -111,6 +118,17 @@ mail-monitor lark-chats --email 你的邮箱     # 顺便查 open_id（私聊推
 📬 需要处理 · 紧急 · Gmail
 谁：量化公司 HR
 事：约下周二 10 点线上面试，明天前确认
+期限：2026-10-14
+建议：回复确认时间
+主题：Interview invitation - AI Agent Engineer | 10-13 15:02
+```
+
+经过 notify-hub 时是一张卡片，内容一样，「谁：什么事」挪到标题上：
+
+```
+量化公司 HR：约下周二 10 点线上面试，明天前确认
+──────────────────────────
+需要处理 · 紧急 · Gmail
 期限：2026-10-14
 建议：回复确认时间
 主题：Interview invitation - AI Agent Engineer | 10-13 15:02
@@ -145,7 +163,7 @@ mail-monitor lark-chats --email 你的邮箱     # 顺便查 open_id（私聊推
 ## 数据去哪了
 
 - 规则没定性的邮件（发件人、主题、时间、正文前 4000 字、相关记忆）会发给你配置的模型；验证码、订阅这类规则直接定性的不发。
-- 推送到 Lark 的只有一句话摘要，不含正文。
+- 推送到 Lark 的只有一句话摘要，不含正文。经过 notify-hub 时，这些摘要也存在本机 notify-hub 的发件箱里（`~/.notify-hub/outbox.db`）。
 - 判断记录存在本机的 `~/.mail-monitor/state.db`，不存正文；秘密只在 `~/.mail-monitor/.env`。
 
 各个模型后端分别发给谁、怎么让某个邮箱完全不经过模型，见[模型后端](docs/model-backends.md#数据去哪了)。
@@ -165,7 +183,7 @@ Agent 项目没有数字站不住脚，所以带了一个最小的评测闭环�
 ## 开发
 
 ```bash
-pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp、fake_claude.py 模拟 claude，不需要 Thunderbird 和账号
+pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp、fake_claude.py 模拟 claude、fake_notify_hub.py 模拟 notify-hub，不需要 Thunderbird 和账号
 ```
 
 | 路径 | 内容 |
@@ -175,10 +193,10 @@ pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp、fake_claud
 | `mail_monitor/memory.py`、`state.py` | 记忆：SQLite 里的已处理邮件、发件人身份、同一话题的历史、你的标注 |
 | `mail_monitor/classify.py`、`llm.py`、`claude_cli.py` | 判断：提示词、固定 schema 的 JSON 输出、Pydantic 校验、保底；`llm.py` 是 API key 版，`claude_cli.py` 是 Claude 订阅版 |
 | `mail_monitor/pipeline.py` | 一次巡检的全过程 |
-| `mail_monitor/notify.py`、`render.py` | 推送：终端 / 群机器人 webhook / 应用机器人；推送文本 |
+| `mail_monitor/notify.py`、`render.py` | 推送：终端 / notify-hub / 群机器人 webhook / 应用机器人；推送文本和卡片的标题、正文 |
 | `mail_monitor/cli.py` | 命令行 |
 | `scripts/` | `install.sh`（装环境）、`launchd.sh`（定时任务） |
-| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）、Thunderbird 没开时的 bridge（`dead_bridge.py`）、假的 claude 命令（`fake_claude.py`）和 88 个测试 |
+| `tests/` | 假的 thunderbird-mcp（`fake_server.py`）、Thunderbird 没开时的 bridge（`dead_bridge.py`）、假的 claude 命令（`fake_claude.py`）、假的 notify-hub 命令（`fake_notify_hub.py`）和 99 个测试 |
 | `docs/` | 架构说明、模型后端、常见问题 |
 
 `tests/fake_server.py` 照抄上游 v0.9.2 的工具名、参数和返回结构，所以能在云端或 CI 里跑通整条流水线；换成真 bridge 只是换一个启动命令。
