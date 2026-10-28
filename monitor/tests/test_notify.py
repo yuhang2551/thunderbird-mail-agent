@@ -156,7 +156,7 @@ def test_empty_receive_id_type_in_env_file_means_infer(tmp_path):
 def test_push_plain_splits_title_and_body():
     push = Push.plain("第一行\n第二行\n第三行", level="urgent")
     assert push.title == "第一行" and push.body == "第二行\n第三行" and push.level == "urgent"
-    assert push.text == "第一行\n第二行\n第三行" and push.key is None
+    assert push.text == "第一行\n第二行\n第三行"
 
 
 def _calls(log):
@@ -164,31 +164,27 @@ def _calls(log):
 
 
 def test_notify_hub_command_puts_the_title_after_the_options():
-    command = NotifyHubNotifier("/x/notify-hub").command(Push(text="t", title="-奇怪的标题", body="b", level="urgent", key="<m-1@x>"))
-    assert command == ["/x/notify-hub", "send", "--body", "-", "--level", "urgent", "--source", "mail", "--key", "<m-1@x>", "--", "-奇怪的标题"]
+    command = NotifyHubNotifier("/x/notify-hub").command(Push(text="t", title="-奇怪的标题", body="b", level="urgent"))
+    assert command == ["/x/notify-hub", "send", "--body", "-", "--level", "urgent", "--source", "mail", "--", "-奇怪的标题"]
 
 
 async def test_notify_hub_gets_the_body_on_stdin(fake_notify_hub):
     binary, log = fake_notify_hub
     notifier = NotifyHubNotifier(binary)
-    await notifier.send(Push(text="全文", title="导师：周五前交数字", body="需要处理 · 紧急\n期限：周五", key="<prof-1@x>"))
+    await notifier.send(Push(text="全文", title="导师：周五前交数字", body="需要处理 · 紧急\n期限：周五"))
     [call] = _calls(log)
-    assert call["args"] == ["send", "--body", "-", "--level", "normal", "--source", "mail", "--key", "<prof-1@x>", "--", "导师：周五前交数字"]
+    assert call["args"] == ["send", "--body", "-", "--level", "normal", "--source", "mail", "--", "导师：周五前交数字"]
     assert call["body"] == "需要处理 · 紧急\n期限：周五"
-    assert notifier.last_output == "✅ 已推送（#1）"
-
-
-async def test_notify_hub_keeping_a_message_for_later_is_not_a_failure(fake_notify_hub, monkeypatch):
-    """notify-hub 连不上 Lark 时把消息存着、之后自己重发，退出码是 0：交出去了就算数，不转入汇总。"""
-    monkeypatch.setenv("FAKE_NOTIFY_HUB_MODE", "queued")
-    notifier = NotifyHubNotifier(fake_notify_hub[0])
-    await notifier.send(Push.plain("x"))
-    assert notifier.last_output.startswith("⏳ 没发出去")
+    assert notifier.last_output == "✅ 已推送"
 
 
 @pytest.mark.parametrize(
     ("mode", "message"),
-    [("bad", "退出码 2：❌ 级别只能是"), ("slow", "没有返回")],
+    [
+        ("down", "退出码 1：❌ 没发出去：.*连不上 Lark"),  # notify-hub 自己重试完还是不行：算推送失败，这封转进汇总
+        ("bad", "退出码 2：❌ 级别只能是"),
+        ("slow", "没有返回"),
+    ],
 )
 async def test_notify_hub_failures_raise(fake_notify_hub, monkeypatch, mode, message):
     monkeypatch.setenv("FAKE_NOTIFY_HUB_MODE", mode)
@@ -212,4 +208,4 @@ def test_notify_hub_version_and_local_bin_fallback(fake_notify_hub, tmp_path, mo
     monkeypatch.setenv("PATH", "/usr/bin:/bin")  # launchd 里 PATH 没有 ~/.local/bin
     notifier = build_notifier(Settings(notify_backend="notify_hub"))
     assert notifier.name == "notify_hub" and notifier.binary == str(home / ".local" / "bin" / "notify-hub")
-    assert notifier.version() == "notify-hub 0.2.1"
+    assert notifier.version() == "notify-hub 0.3.0"

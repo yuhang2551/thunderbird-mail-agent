@@ -1,6 +1,7 @@
 """推送层：把一条消息发出去。四种后端：终端、notify-hub、飞书 / Lark 群自定义机器人（webhook）、飞书 / Lark 应用机器人。
 
-- notify-hub 是本机的通知网关（https://github.com/yuhang2551/notify-hub）：Lark 卡片、夜里免打扰、去重、失败重发都归它管。
+- notify-hub 是本机的推送工具（https://github.com/yuhang2551/notify-hub）：只管把卡片马上发到 Lark，连不上当场重试几次。
+  什么时候推、夜里推不推、推不出去怎么办，都在这边定（见 pipeline）。
 - 自定义机器人最简单：群里加一个机器人就有 webhook，可选签名校验。
 - 应用机器人需要 app_id / app_secret，可以直接私聊发给你，不用建群。
 """
@@ -33,13 +34,12 @@ class NotifyError(RuntimeError):
 
 @dataclass(frozen=True)
 class Push:
-    """要推的一条消息。终端和 Lark 文本消息发 text；notify-hub 用 title、body 做卡片，按 level 分级、按 key 去重。"""
+    """要推的一条消息。终端和 Lark 文本消息发 text；notify-hub 用 title、body 做卡片，level 决定卡片颜色。"""
 
     text: str
     title: str
     body: str = ""
-    level: Level = "normal"  # urgent：红色卡片，夜里也发；normal：notify-hub 免打扰时段先攒着，结束后合成一张发
-    key: str | None = None
+    level: Level = "normal"  # urgent：红色卡片；normal：蓝色卡片。什么时候推由流水线决定，这里只管样子
 
     @classmethod
     def plain(cls, text: str, *, level: Level = "normal") -> Push:
@@ -75,22 +75,21 @@ _INSTALL_HINT = (
 
 
 class NotifyHubNotifier:
-    """交给 notify-hub：调用它的命令行，正文从标准输入传。推不出去时它先把消息存进发件箱、之后自己重发，
-    所以它正常退出就算交出去了；只有它没装、参数不对、配置坏了才算失败。"""
+    """交给 notify-hub：调用它的命令行，正文从标准输入传。连不上 Lark 时它当场重试几次，还发不出去就以非 0 退出，
+    这里算推送失败：流水线把这封转进汇总，下次 digest 再带上。"""
 
     name = "notify_hub"
-    source = "mail"  # 在 notify-hub 里分组、限流用的来源名
+    source = "mail"  # 写在卡片底部的来源名
 
+    # notify-hub 连不上 Lark 时会当场隔 2 秒、5 秒各重试一次，每次请求最多等 10 秒，60 秒够它试完
     def __init__(self, binary: str = "notify-hub", *, timeout: float = 60.0):
         self.binary = resolve_binary(binary)
         self.timeout = timeout
         self.last_output = ""  # notify-hub 最后一次说了什么，notify-test 打印给你看
 
     def command(self, push: Push) -> list[str]:
-        command = [self.binary, "send", "--body", "-", "--level", push.level, "--source", self.source]
-        if push.key:
-            command += ["--key", push.key]
-        return [*command, "--", push.title]  # 标题放在 -- 后面，以 - 开头也不会被当成选项
+        # 标题放在 -- 后面，以 - 开头也不会被当成选项
+        return [self.binary, "send", "--body", "-", "--level", push.level, "--source", self.source, "--", push.title]
 
     async def send(self, push: Push) -> None:
         env = {**os.environ, "PYTHONUTF8": "1"}  # launchd 下没有 LANG，中文照样按 UTF-8 传

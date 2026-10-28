@@ -6,9 +6,32 @@
 
 ## 下一段
 
-1. 等第一封新邮件进来，用 `./scripts/launchd.sh status` 看一眼：定时任务里调 Claude 判断、经 notify-hub 推送都正常。
-2. 用一周：`review` 标注、`eval` 看漏推率和噪声率，按结果调规则和提示词。顺手把 `rules.yaml` 里导师那条的示例地址换成真的，写上 `MAIL_MONITOR_PROFILE`。
-3. ChatGPT 订阅版（做法已写在[模型后端](docs/model-backends.md)里，先不急）。
+1. 在 Mac 上先按 notify-hub [README](https://github.com/yuhang2551/notify-hub#从-02-升级) 里「从 0.2 升级」的步骤把它升到 0.3：用 0.2 把存着的消息发掉、卸掉它的定时任务，再升级。然后这边 `git pull`，再运行一次 `./scripts/launchd.sh install`，汇总换成 8、12、18 点。
+2. 等第一封新邮件进来，用 `./scripts/launchd.sh status` 看一眼：定时任务里调 Claude 判断、经 notify-hub 推送都正常。
+3. 用一周：`review` 标注、`eval` 看漏推率和噪声率，按结果调规则和提示词。顺手把 `rules.yaml` 里导师那条的示例地址换成真的，写上 `MAIL_MONITOR_PROFILE`。
+4. ChatGPT 订阅版（做法已写在[模型后端](docs/model-backends.md)里，先不急）。
+
+## 2026-10-28 · 什么时候推，全由邮件监控定
+
+**为什么改**
+
+notify-hub 0.2 自己也管时间：免打扰、汇总、每天三次的定时任务。邮件监控也有定时任务和汇总。两边各一套时间表，一条通知几点到，要把两边的设置放在一起才算得出来。现在 notify-hub 0.3 只管马上发（见它的[更新记录](https://github.com/yuhang2551/notify-hub/blob/main/CHANGELOG.md)），什么时候推全在这边定。
+
+**改动**
+
+- 汇总默认每天 8、12、18 点三次，原来是 9 点和 18 点两次。想改用 `DIGEST_HOURS`。
+- 新增免打扰时段 `MAIL_MONITOR_QUIET_HOURS`，默认 `23:00-08:00`，按 `MAIL_MONITOR_TZ` 的钟点算（不填就是本机时区）。这段时间里只即时推送规则写了 `urgency: high` 的（比如导师），其余本该马上推的进汇总，8 点那次一起发；写 `off` 关掉。模型判断的「紧急」不算，因为邮件的措辞能把模型带偏。
+- 推送失败的邮件进汇总，下次汇总带上；notify-hub 会先当场重试几次，还发不出去才算失败。汇总本身推不出去时，邮件都还攒着，`digest` 报错退出，下次汇总再带上。
+- 赶上免打扰或推送失败、最后进了汇总的邮件，记录里仍算「判断为即时推送」，所以 `eval` 的漏推率只看判断准不准，不受几点到的影响。
+- 不再给 notify-hub 传 `--key`：0.3 不去重，一封邮件推没推过本来就记在这边的数据库里。这一版配旧的 notify-hub 0.2.1 也能发，`doctor` 会提醒升级。
+- `doctor` 多显示一行免打扰时段。`notify-test` 改按普通级别发：以前按紧急发，是怕被 notify-hub 的免打扰攒着，现在它不攒了。
+- 测试 124 个，新加的覆盖免打扰时段的写法和跨午夜的判断、夜里只推导师那类、即时推送和汇总推不出去时邮件都不丢。
+
+**文档更正**
+
+- README、架构说明、FAQ 里「notify-hub 管免打扰、去重、失败重发」的说法都改掉了，README 加了一节「什么时候推」。
+- 原来几处写着「电脑睡眠时不跑，醒来补跑一次」，对巡检不对。按[苹果的 launchd 文档](https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html)，按间隔跑的任务（巡检）睡眠中错过的直接跳过，醒来后到下一个间隔才跑；按钟点跑的任务（汇总）赶上睡眠的，醒来补跑一次。launchd 也不会为任务叫醒电脑。巡检每次回看两天，所以睡眠期间的邮件不会漏，只是醒来后最多晚一小时。
+- 根目录 README 还写着每 5 分钟巡检，改成了每小时。
 
 ## 2026-10-28 · 定时任务改成每小时一次，Mac 上跑起来了
 

@@ -53,7 +53,6 @@ def instant_push(header: MessageHeader, decision: Decision, timezone_name: str |
         title=f"{who}：{brief}",
         body="\n".join([head, *([f"事：{what}"] if brief != what else []), *details]),
         level="urgent" if urgent else "normal",
-        key=header.id,
     )
 
 
@@ -62,7 +61,7 @@ def render_instant(header: MessageHeader, decision: Decision, timezone_name: str
 
 
 def digest_push(rows: list[Mapping[str, Any]], *, now: datetime | None = None, timezone_name: str | None = None) -> Push:
-    """早晚汇总。卡片标题是「邮件汇总 · N 封」，正文是分好组的列表；按普通级别发。"""
+    """汇总（launchd 默认每天 8、12、18 点各发一次）。卡片标题是「邮件汇总 · N 封」，正文是分好组的列表；按普通级别发。"""
     return Push(
         text=render_digest(rows, now=now, timezone_name=timezone_name),
         title=f"邮件汇总 · {len(rows)} 封",

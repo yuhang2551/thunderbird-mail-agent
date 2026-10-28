@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -110,12 +111,19 @@ def doctor() -> None:
     try:
         notifier = build_notifier(settings)
         if isinstance(notifier, NotifyHubNotifier):
-            typer.echo(f"✅ 推送：notify_hub（{notifier.version()}，{notifier.binary}）")
+            hub_version = notifier.version()
+            typer.echo(f"✅ 推送：notify_hub（{hub_version}，{notifier.binary}）")
+            if re.search(r"\b0\.[0-2]\.\d", hub_version):
+                typer.echo("⚠️  notify-hub 还是 0.2 版：它自己还有一套免打扰和定时任务。按它 README 里「从 0.2 升级」的步骤升到 0.3")
         else:
             typer.echo(f"✅ 推送：{notifier.name}")
     except NotifyError as exc:
         ok = False
         typer.echo(f"❌ 推送：{exc}")
+    if settings.quiet_window:
+        typer.echo(f"✅ 免打扰：{settings.quiet_hours}，这段时间只即时推送规则写了 urgency: high 的，其余的进汇总")
+    else:
+        typer.echo("✅ 免打扰：关（MAIL_MONITOR_QUIET_HOURS=off），要紧的邮件夜里也马上推")
 
     typer.echo(f"数据库：{settings.resolved_db_path}")
     raise typer.Exit(code=0 if ok else 1)
@@ -157,11 +165,15 @@ def run(
 
 @app.command()
 def digest() -> None:
-    """把攒着的邮件合成一条汇总推送出去。配合 launchd 早晚各跑一次。"""
+    """把攒着的邮件合成一条汇总推送出去。配合 launchd 每天 8、12、18 点各跑一次。"""
     from .pipeline import send_digest
 
     settings = _settings()
-    count = asyncio.run(send_digest(settings))
+    try:
+        count = asyncio.run(send_digest(settings))
+    except NotifyError as exc:
+        typer.echo(f"{_stamp(settings)} ❌ 汇总没推出去，邮件都还攒着，下次汇总再带上：{exc}")
+        raise typer.Exit(code=1)
     typer.echo(f"{_stamp(settings)} " + ("没有待汇总的邮件" if count == 0 else f"已汇总 {count} 封"))
 
 
@@ -328,8 +340,7 @@ def notify_test(text: str = typer.Argument("邮箱监控 Agent 测试消息 ✅"
     async def go() -> str:
         notifier = build_notifier(settings)
         try:
-            # 按紧急发：测试消息要马上到手机，不能被 notify-hub 的免打扰时段攒着
-            await notifier.send(Push.plain(text, level="urgent"))
+            await notifier.send(Push.plain(text))
             return getattr(notifier, "last_output", "")
         finally:
             close = getattr(notifier, "aclose", None)
@@ -341,7 +352,7 @@ def notify_test(text: str = typer.Argument("邮箱监控 Agent 测试消息 ✅"
     except NotifyError as exc:
         typer.echo(f"❌ {exc}")
         raise typer.Exit(code=1)
-    # notify-hub 推不出去时会先存着、之后重发，它自己的话最准
+    # 用 notify-hub 时把它的原话打出来：重试过几次也写在里面
     typer.echo(f"notify-hub：{output}" if output else f"✅ 已通过 {settings.notify_backend} 发送")
 
 

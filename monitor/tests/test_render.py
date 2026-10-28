@@ -41,7 +41,7 @@ def test_instant_push_card_puts_who_and_what_in_the_title():
     push = instant_push(header, decision, "Asia/Dubai")
     assert push.title == "量化公司 HR：约面试"
     assert push.body.splitlines() == ["需要处理 · 紧急 · Gmail", "期限：2026-10-14", "主题：Interview invitation | 10-13 12:00"]
-    assert push.level == "normal" and push.key == "<hr-1@x>"  # 模型说紧急不算，规则写了才按紧急推
+    assert push.level == "normal"  # 模型说紧急不算，规则写了才按紧急推
     assert push.text == render_instant(header, decision, "Asia/Dubai")
     assert instant_push(header, decision, urgent=True).level == "urgent"
 
@@ -63,6 +63,6 @@ def test_digest_push_card():
         {"id": "2", "who": "", "what": "", "needs_action": "no", "deadline": None, "decided_by": "rule", "category": "订阅/通知", "sender_name": "ArXiv", "sender_email": "n@x", "subject": "papers", "account": None, "received_at": None},
     ]
     push = digest_push(rows, now=datetime(2026, 10, 13, 14, 0, tzinfo=timezone.utc), timezone_name="Asia/Dubai")
-    assert push.title == "邮件汇总 · 2 封" and push.level == "normal" and push.key is None
+    assert push.title == "邮件汇总 · 2 封" and push.level == "normal"
     assert push.body == "需要处理（1）\n• HR：约面试 [Gmail 10-13 12:00]\n\n已忽略：订阅/通知 1"
     assert push.text.startswith("📮 邮件汇总 10-13 18:00 · 共 2 封\n\n需要处理（1）")

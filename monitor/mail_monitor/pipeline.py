@@ -1,6 +1,7 @@
 """流水线：拉新邮件 → 去重 → 规则 → 取记忆 → 判断 → （可选）打标签 → 推送 → 记录（含更新发件人记忆）。
 
 一次 run_once 就是一次完整的巡检。调度交给 launchd / cron，默认每小时跑一次。
+什么时候推也在这里定：免打扰时段只即时推送规则写了 urgency: high 的，其余的进汇总；推送工具只管马上发。
 这里故意写成一条直线，没有上框架：流程是线性的，状态就是一个 RunReport。
 """
 from __future__ import annotations
@@ -37,6 +38,7 @@ class RunReport:
     by_fallback: int = 0
     pushed: int = 0
     digest_pending: int = 0
+    held: int = 0  # 本该即时推送、赶上免打扰时段进了汇总的（也算在 digest_pending 里）
     ignored: int = 0
     tagged: int = 0
     relations: int = 0  # 这次新记住（或更新）了几个发件人的身份
@@ -46,7 +48,9 @@ class RunReport:
         return (
             f"收件箱 {self.inboxes} 个，拉到 {self.fetched} 封，新邮件 {self.new} 封"
             f"（规则 {self.by_rule}，模型 {self.by_llm}，保底 {self.by_fallback}）；"
-            f"即时推送 {self.pushed}，待汇总 {self.digest_pending}，忽略 {self.ignored}"
+            f"即时推送 {self.pushed}，待汇总 {self.digest_pending}"
+            + (f"（含免打扰时段留下的 {self.held}）" if self.held else "")
+            + f"，忽略 {self.ignored}"
             + (f"，打标签 {self.tagged}" if self.tagged else "")
             + (f"，记住发件人身份 {self.relations} 个" if self.relations else "")
             + (f"；错误 {len(self.errors)} 个" if self.errors else "")
@@ -105,8 +109,10 @@ async def run_once(
     classifier: Classifier | None = None,
     rules: RuleSet | None = None,
     state: State | None = None,
+    now: datetime | None = None,
 ) -> RunReport:
     report = RunReport()
+    quiet = settings.in_quiet_hours(now or datetime.now(timezone.utc))
     rules = rules or RuleSet.load(settings.resolved_rules_path)
     # dry-run 用内存数据库：不记录、不推送，代价是没有记忆可参考
     state = state or State(":memory:" if dry_run else settings.resolved_db_path)
@@ -148,9 +154,9 @@ async def run_once(
 
             decided.sort(key=lambda item: item[0].date or datetime.min.replace(tzinfo=timezone.utc))
             for header, decision, rule in decided:
-                await _settle(header, decision, rule, settings, state, mailbox, notifier, report)
+                await _settle(header, decision, rule, settings, state, mailbox, notifier, report, quiet=quiet)
             if dry_run:
-                # 试跑时把会进早晚汇总的也打出来，不然只看得到即时推送的那几封
+                # 试跑时把会进汇总的也打出来，不然只看得到即时推送的那几封
                 await send_digest(settings, notifier=notifier, state=state)
     except MailboxError as exc:
         report.errors.append(f"连不上 Thunderbird：{exc}")
@@ -180,6 +186,8 @@ async def _settle(
     mailbox: Mailbox,
     notifier: Notifier,
     report: RunReport,
+    *,
+    quiet: bool = False,
 ) -> None:
     report.by_rule += decision.decided_by == "rule"
     report.by_llm += decision.decided_by == "llm"
@@ -195,29 +203,36 @@ async def _settle(
         except MailboxError as exc:
             report.errors.append(f"打标签失败（{header.subject[:30]}）：{exc}")
 
+    # notify_mode 记的是判断（评测按它算召回）；这封最后是推出去了还是进了汇总，看 pushed 和 to_digest
     mode = decision.notify_mode
     pushed = False
+    to_digest = mode == "digest"
     if mode == "instant":
-        # 只有规则里写明 urgency: high 的（比如导师）按紧急推，夜里也发；模型判断的紧急只写在消息里，
-        # 免打扰时段先攒着（notify-hub 管这个）
+        # 只有规则里写明 urgency: high 的（比如导师）按紧急推，夜里也发。模型判断的紧急只写在消息里：
+        # 邮件的措辞能把模型带偏，夜里叫醒你的只能是你自己写的规则
         urgent = rule is not None and rule.then.urgency == "high"
-        try:
-            await notifier.send(instant_push(header, decision, settings.timezone, urgent=urgent))
-            pushed = True
-            report.pushed += 1
-        except NotifyError as exc:
-            # 推送失败就转成待汇总，下次 digest 还能带上，不会丢
-            report.errors.append(f"推送失败，转入汇总：{exc}")
-            mode = "digest"
-    if mode == "digest":
+        if quiet and not urgent:
+            # 免打扰时段：先进汇总，免打扰结束时的那次汇总（默认 8 点）一起发
+            to_digest = True
+            report.held += 1
+        else:
+            try:
+                await notifier.send(instant_push(header, decision, settings.timezone, urgent=urgent))
+                pushed = True
+                report.pushed += 1
+            except NotifyError as exc:
+                # 推送失败就转进汇总，下次 digest 还能带上，不会丢
+                report.errors.append(f"推送失败，转入汇总：{exc}")
+                to_digest = True
+    if to_digest:
         report.digest_pending += 1
     elif mode == "never":
         report.ignored += 1
-    state.record(header, decision, notify_mode=mode, pushed=pushed)
+    state.record(header, decision, notify_mode=mode, pushed=pushed, to_digest=to_digest)
 
 
 async def send_digest(settings: Settings, *, notifier: Notifier | None = None, state: State | None = None) -> int:
-    """把攒着的邮件合成一条发出去。返回这次汇总了几封。"""
+    """把攒着的邮件合成一条发出去，返回这次汇总了几封。推不出去抛 NotifyError，邮件都还攒着，下次汇总再带上。"""
     state = state or State(settings.resolved_db_path)
     notifier = notifier or build_notifier(settings)
     rows = state.pending_digest()
