@@ -6,10 +6,24 @@
 
 ## 下一段
 
-1. 在 Mac 上 `git pull`，`.env` 里的推送改成 `notify_hub`，`mail-monitor notify-test` 发到手机上。
-2. `mail-monitor init` 把现有邮件登记为已见，装 launchd 定时任务，真正跑起来。多久巡检一次到时候再定（脚本现在默认每 5 分钟）。
-3. 用一周：`review` 标注、`eval` 看漏推率和噪声率，按结果调规则和提示词。
-4. ChatGPT 订阅版（做法已写在[模型后端](docs/model-backends.md)里，先不急）。
+1. 在 Mac 上 `git pull`，`.env` 里的推送改成 `notify_hub`，`mail-monitor init` 把现有邮件登记为已见，`./scripts/launchd.sh install` 装上定时任务，真正跑起来。
+2. 用一周：`review` 标注、`eval` 看漏推率和噪声率，按结果调规则和提示词。顺手把 `rules.yaml` 里导师那条的示例地址换成真的，写上 `MAIL_MONITOR_PROFILE`。
+3. ChatGPT 订阅版（做法已写在[模型后端](docs/model-backends.md)里，先不急）。
+
+## 2026-10-28 · 定时任务改成每小时一次
+
+**改动**
+
+- `scripts/launchd.sh` 默认每小时巡检一次，原来是每 5 分钟。找工作和学校的邮件晚一小时看到一般不耽误事，后台不用跑得太勤；查得勤也不会多花模型额度，因为模型只看新邮件。想改用 `RUN_INTERVAL`。
+- 装上和开机登录时先巡检一次，不用等一小时。
+- 没跑过 `mail-monitor init` 时，`install` 会停下来提醒：装上就先巡检，没 init 的话会把最近两天的邮件全推一遍。
+- launchd 的 PATH 加上 `~/.local/bin`，claude 和 notify-hub 都装在这里。
+- 新增 `./scripts/launchd.sh print`：只打印要装的 plist，不安装；测试也用它检查生成的内容。
+
+**实测中发现并改好**
+
+- `notify-test` 经 notify-hub 发的时候，结果打了两遍（日志一遍、结果一遍）。现在只打一遍；巡检时要看 notify-hub 的回答，加 `-v`。
+- 测试 103 个。
 
 ## 2026-10-27 · 推送可以交给 notify-hub
 
@@ -26,7 +40,7 @@
 **验证到哪一步**
 
 - 在云端用真的 notify-hub（推到终端，不推 Lark）跑了一遍完整巡检：导师的邮件按紧急发出，其余的在免打扰时段被 notify-hub 存了起来。
-- 还没在 Mac 上接真的 Lark 试，见下一段第 1 步。
+- 2026-10-28 在 Mac 上实测：`git pull` 后加上 `MAIL_MONITOR_NOTIFY=notify_hub` 跑 `doctor`，推送一行显示 notify-hub 0.2.1，两个收件箱和 Claude 订阅也都正常；`notify-test` 经 notify-hub 发出，Lark 收下了（notify-hub 里是第 7 条）。
 
 ## 2026-10-27 · Lark 推送测通
 

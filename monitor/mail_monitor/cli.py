@@ -136,7 +136,7 @@ def run(
     dry_run: bool = typer.Option(False, "--dry-run", help="只判断、打印（即时推送的和会进汇总的都打出来），不记录、不推送"),
     days: int | None = typer.Option(None, help="覆盖 days_back"),
 ) -> None:
-    """巡检一次：拉新邮件、判断、推送。配合 launchd / cron 每几分钟跑一次。"""
+    """巡检一次：拉新邮件、判断、推送。配合 launchd / cron 定时跑（默认每小时）。"""
     from .pipeline import run_once
 
     settings = _settings()

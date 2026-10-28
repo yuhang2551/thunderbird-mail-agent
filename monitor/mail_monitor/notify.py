@@ -113,7 +113,7 @@ class NotifyHubNotifier:
         self.last_output = (stdout + stderr).decode("utf-8", errors="replace").strip()
         if process.returncode != 0:
             raise NotifyError(f"notify-hub 退出码 {process.returncode}：{self.last_output[:200]}")
-        log.info("notify-hub：%s", self.last_output)
+        log.debug("notify-hub：%s", self.last_output)  # notify-test 会把它打出来，巡检时用 -v 才看得到
 
     def version(self) -> str:
         """doctor 用：notify-hub 装好了没有，是哪个版本。不联网。"""

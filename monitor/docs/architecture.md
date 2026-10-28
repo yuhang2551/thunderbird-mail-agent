@@ -6,7 +6,7 @@
 
 ## 一句话
 
-每 5 分钟醒一次，把新邮件分成"要管、拿不准、知道就行、不用看"四类：前两类立刻推到 Lark，"知道就行"攒成早晚两份汇总，"不用看"只记录。判断时会参考它记住的东西：这个发件人是谁，同一件事之前说过什么。
+每小时醒一次（间隔可以改），把新邮件分成"要管、拿不准、知道就行、不用看"四类：前两类立刻推到 Lark，"知道就行"攒成早晚两份汇总，"不用看"只记录。判断时会参考它记住的东西：这个发件人是谁，同一件事之前说过什么。
 
 ## 1. 由哪几块组成
 
@@ -19,14 +19,14 @@
 | 记忆 | SQLite：处理过哪些邮件、每个发件人是谁、同一话题之前说了什么、你标的答案 | `state.py`、`memory.py` |
 | 行动 | 默认只读。唯一的写操作是给"要管"的邮件打标签，默认关；永远不发信、不删信 | `pipeline.py` |
 | 推送 | 即时消息和早晚汇总，发到终端、Lark 群机器人、Lark 应用机器人，或者交给本机的通知网关 notify-hub | `notify.py`、`render.py` |
-| 调度 | launchd 每 5 分钟跑一次 `run`，每天 9 点、18 点各跑一次 `digest` | `scripts/launchd.sh` |
+| 调度 | launchd 每小时跑一次 `run`（装上和开机登录时先跑一次），每天 9 点、18 点各跑一次 `digest` | `scripts/launchd.sh` |
 
 ## 2. 整体结构
 
 ```mermaid
 flowchart LR
     subgraph mac["你的 Mac"]
-        L["launchd<br/>每 5 分钟"] --> M["mail-monitor run"]
+        L["launchd<br/>每小时"] --> M["mail-monitor run"]
         M <-->|"MCP（stdio）"| B["mcp-bridge.cjs"]
         B <-->|"HTTP + 令牌，只在本机"| T["Thunderbird + 扩展<br/>Gmail、学校邮箱"]
         M <--> D[("SQLite<br/>state.db")]
@@ -52,7 +52,7 @@ sequenceDiagram
     participant D as SQLite
     participant A as 模型
     participant K as Lark
-    L->>M: 每 5 分钟启动一次 run
+    L->>M: 每小时启动一次 run
     M->>T: listAccounts、listFolders
     M->>T: getRecentMessages（每个收件箱，最近 2 天）
     M->>D: 这些 id 处理过吗
@@ -159,6 +159,8 @@ flowchart TD
 **为什么用 SQLite，不用向量库？** 记忆要查的是"同一个发件人""同一个话题"，精确匹配就够，量级是几千封邮件。SQLite 就是一个文件，不用装服务，备份就是复制。
 
 **为什么用 launchd 定时跑，不做常驻进程？** 每次都是一个全新的进程，这次崩了下次照样跑；电脑睡眠时不跑，醒来补一次；不用自己管重连和内存。代价是每次都要重新启动 bridge，多一点启动时间。
+
+**为什么默认每小时查一次？** 找工作和学校的邮件，晚一小时看到一般不耽误事，后台也不用跑得太勤。查得勤不会多花模型额度：模型只看新邮件，每封只判断一次，多出来的只是几秒钟的巡检。想更及时就把 `RUN_INTERVAL` 改小。间隔长了以后，开机后要等很久才第一次巡检，所以装上和开机登录时先跑一次。
 
 **为什么去重靠数据库，不看"未读"？** 你在手机上读过的邮件也可能要管。回看 2 天是为了容错：电脑睡眠或 Thunderbird 没开时进来的邮件，下次还能补上。
 

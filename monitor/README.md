@@ -2,17 +2,17 @@
 
 **中文** | [English](README_EN.md)
 
-本仓库原来的用法是你开口问（"看看这周的邮件"），Agent 才去读。这个目录把它变成**自动盯着**：每几分钟巡检一次所有收件箱，新邮件进来就判断"谁、什么事、要不要管、几号前"，推送到飞书 / Lark。
+本仓库原来的用法是你开口问（"看看这周的邮件"），Agent 才去读。这个目录把它变成**自动盯着**：定时（默认每小时）巡检一次所有收件箱，新邮件进来就判断"谁、什么事、要不要管、几号前"，推送到飞书 / Lark。
 
 ```
-launchd 每 5 分钟 ──► mail-monitor run
-                        │ 1 通过 MCP 调 thunderbird-mcp：listFolders → getRecentMessages
-                        │ 2 去重（SQLite 记住处理过的邮件）
-                        │ 3 规则层（rules.yaml：验证码不推、订阅只汇总、导师一律紧急……）
-                        │ 4 规则没覆盖的：读正文 + 取记忆（这个发件人是谁、同一话题之前说了什么）→ 模型判断（固定 schema 的 JSON）
-                        │ 5 可选：给"需要处理"的打 Thunderbird 标签（默认关）
-                        │ 6 推送：要管 / 拿不准 → 即时；其余 → 早晚汇总（mail-monitor digest）
-                        └ 7 记录：判断结果和发件人身份写回 SQLite，下次当作记忆
+launchd 每小时 ──► mail-monitor run
+                     │ 1 通过 MCP 调 thunderbird-mcp：listFolders → getRecentMessages
+                     │ 2 去重（SQLite 记住处理过的邮件）
+                     │ 3 规则层（rules.yaml：验证码不推、订阅只汇总、导师一律紧急……）
+                     │ 4 规则没覆盖的：读正文 + 取记忆（这个发件人是谁、同一话题之前说了什么）→ 模型判断（固定 schema 的 JSON）
+                     │ 5 可选：给"需要处理"的打 Thunderbird 标签（默认关）
+                     │ 6 推送：要管 / 拿不准 → 即时；其余 → 早晚汇总（mail-monitor digest）
+                     └ 7 记录：判断结果和发件人身份写回 SQLite，下次当作记忆
 ```
 
 它**只读邮件，不发不删**。写邮箱的动作只有一个"打标签"，默认关闭。
@@ -49,20 +49,22 @@ mail-monitor eval        # 用标注算准确率：漏推几封、噪声几封
 
 ### 定时运行
 
-macOS 用 launchd（比常驻进程稳：电脑睡眠时不跑，醒来补跑一次）：
+macOS 用 launchd（比常驻进程稳：电脑睡眠时不跑，醒来补跑一次；开机登录时也先跑一次）：
 
 ```bash
-./scripts/launchd.sh install     # 每 5 分钟 run 一次，每天 9 点和 18 点各 digest 一次
+./scripts/launchd.sh install     # 装上先 run 一次，之后每小时一次；每天 9 点和 18 点各 digest 一次
 ./scripts/launchd.sh status      # 看装没装、上次退出码、日志最后几行
 ./scripts/launchd.sh uninstall
 ```
 
-间隔和时间可以改：`RUN_INTERVAL=120 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install`。日志在 `~/.mail-monitor/logs/`。装之前先跑一次 `mail-monitor init`，不然它会把现有邮件全推一遍。
+间隔和时间可以改，比如每 30 分钟巡检、8 点 13 点 20 点汇总：`RUN_INTERVAL=1800 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install`。查得勤不会多花模型额度，模型只看新邮件，每封只判断一次。`./scripts/launchd.sh print` 只打印要装的内容，不安装。日志在 `~/.mail-monitor/logs/`。
+
+装之前先跑一次 `mail-monitor init`，不然第一次巡检会把最近两天的邮件全推一遍；没跑过的话 `install` 会停下来提醒你。
 
 Linux 用 cron：
 
 ```
-*/5 * * * *  ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor run    >> ~/.mail-monitor/logs/run.log 2>&1
+0 * * * *    ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor run    >> ~/.mail-monitor/logs/run.log 2>&1
 0 9,18 * * * ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor digest >> ~/.mail-monitor/logs/digest.log 2>&1
 ```
 

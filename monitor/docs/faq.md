@@ -46,7 +46,7 @@ PYTHON="$(~/.local/bin/uv python find 3.13)" ./scripts/install.sh
 
 **第一次 run 推了一大堆旧邮件**
 
-装好后要先跑一次 `mail-monitor init`，把现有的邮件登记为已见。
+装好后要先跑一次 `mail-monitor init`，把现有的邮件登记为已见。现在没跑过 init 的话，`./scripts/launchd.sh install` 会停下来提醒你。
 
 **手机上没收到**
 

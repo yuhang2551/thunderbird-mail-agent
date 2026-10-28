@@ -1,6 +1,6 @@
 """流水线：拉新邮件 → 去重 → 规则 → 取记忆 → 判断 → （可选）打标签 → 推送 → 记录（含更新发件人记忆）。
 
-一次 run_once 就是一次完整的巡检。调度交给 launchd / cron，每几分钟跑一次。
+一次 run_once 就是一次完整的巡检。调度交给 launchd / cron，默认每小时跑一次。
 这里故意写成一条直线，没有上框架：流程是线性的，状态就是一个 RunReport。
 """
 from __future__ import annotations

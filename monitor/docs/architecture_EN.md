@@ -6,7 +6,7 @@ This document covers what the mail-monitor agent is made of, what happens during
 
 ## In one sentence
 
-Every 5 minutes it wakes up and sorts new mail into "needs action", "unsure", "for your information" and "ignore": the first two are pushed to Lark right away, "for your information" is batched into a morning and an evening digest, and "ignore" is only recorded. Each verdict draws on what it remembers: who the sender is, and what was said earlier about the same matter.
+Every hour (configurable) it wakes up and sorts new mail into "needs action", "unsure", "for your information" and "ignore": the first two are pushed to Lark right away, "for your information" is batched into a morning and an evening digest, and "ignore" is only recorded. Each verdict draws on what it remembers: who the sender is, and what was said earlier about the same matter.
 
 ## 1. The parts
 
@@ -19,14 +19,14 @@ An agent is usually split into perception, decision, action, memory and push. Ea
 | Memory | SQLite: which mail was handled, who each sender is, what the same thread said before, your labels | `state.py`, `memory.py` |
 | Action | Read-only by default. The one write is tagging "needs action" mail, off by default; it never sends or deletes | `pipeline.py` |
 | Push | Instant messages and the morning and evening digest, to the terminal, a Lark group bot, a Lark app bot, or handed to notify-hub, a local notification gateway | `notify.py`, `render.py` |
-| Scheduling | launchd runs `run` every 5 minutes and `digest` at 09:00 and 18:00 | `scripts/launchd.sh` |
+| Scheduling | launchd runs `run` every hour (and once at install and login) and `digest` at 09:00 and 18:00 | `scripts/launchd.sh` |
 
 ## 2. The big picture
 
 ```mermaid
 flowchart LR
     subgraph mac["Your Mac"]
-        L["launchd<br/>every 5 min"] --> M["mail-monitor run"]
+        L["launchd<br/>every hour"] --> M["mail-monitor run"]
         M <-->|"MCP (stdio)"| B["mcp-bridge.cjs"]
         B <-->|"HTTP + token, local only"| T["Thunderbird + add-on<br/>Gmail, university mail"]
         M <--> D[("SQLite<br/>state.db")]
@@ -52,7 +52,7 @@ sequenceDiagram
     participant D as SQLite
     participant A as Model
     participant K as Lark
-    L->>M: start run every 5 minutes
+    L->>M: start run every hour
     M->>T: listAccounts, listFolders
     M->>T: getRecentMessages (each inbox, last 2 days)
     M->>D: were these ids handled already
@@ -161,6 +161,8 @@ A sender's identity has three sources, from highest to lowest priority: what you
 **Why SQLite and not a vector database?** Memory looks up "the same sender" and "the same thread", which exact matching handles, at the scale of a few thousand messages. SQLite is one file, needs no server, and backing it up means copying it.
 
 **Why a scheduled launchd job instead of a daemon?** Every run is a fresh process: if one crashes the next still runs, nothing runs while the Mac sleeps and one catch-up run happens on wake, and there are no reconnects or memory to manage. The price is starting the bridge again each time, a little extra startup.
+
+**Why check hourly by default?** Job-search and university mail can usually wait an hour, and the background job need not run often. Checking more often costs no extra model usage: the model only sees new mail, once per message, so the extra runs are a few seconds of checking each. Lower `RUN_INTERVAL` for faster pushes. With a long interval, the first check after booting would come late, so one run happens at install and at login.
 
 **Why dedupe through the database rather than "unread"?** Mail you already read on your phone may still need action. Looking back 2 days is for resilience: mail that arrived while the Mac slept or Thunderbird was closed is caught next time.
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 把 mail-monitor 装成 macOS 的定时任务（launchd）：每 5 分钟 run 一次，早 9 点和晚 6 点各 digest 一次。
-# 用法：./scripts/launchd.sh install | uninstall | status
-# 可选环境变量：MAIL_MONITOR_BIN（默认 monitor/.venv/bin/mail-monitor）、RUN_INTERVAL（秒，默认 300）、
+# 把 mail-monitor 装成 macOS 的定时任务（launchd）：每小时 run 一次，早 9 点和晚 6 点各 digest 一次。
+# 用法：./scripts/launchd.sh install | uninstall | status | print（只打印要装的 plist，不安装）
+# 可选环境变量：MAIL_MONITOR_BIN（默认 monitor/.venv/bin/mail-monitor）、RUN_INTERVAL（秒，默认 3600）、
 #              DIGEST_HOURS（默认 "9 18"）、MAIL_MONITOR_HOME（默认 ~/.mail-monitor）
-# 电脑睡眠时任务不跑，醒来后 launchd 会补跑一次，所以不会漏邮件。
+# 电脑睡眠时任务不跑，醒来后 launchd 会补跑一次；装上和开机登录时 run 也先跑一次，所以不会漏邮件。
 set -euo pipefail
 
 MONITOR_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,7 +12,7 @@ HOME_DIR="${MAIL_MONITOR_HOME:-$HOME/.mail-monitor}"
 LOG_DIR="$HOME_DIR/logs"
 AGENTS="$HOME/Library/LaunchAgents"
 PREFIX="com.thunderbird-mail-agent.mail-monitor"
-RUN_INTERVAL="${RUN_INTERVAL:-300}"
+RUN_INTERVAL="${RUN_INTERVAL:-3600}"
 DIGEST_HOURS="${DIGEST_HOURS:-9 18}"
 NODE_DIR="$(dirname "$(command -v node 2>/dev/null || echo /usr/local/bin/node)")"
 # Claude 订阅版（MAIL_MONITOR_LLM=claude）要调用 claude；官方安装器默认装在 ~/.local/bin
@@ -20,14 +20,30 @@ CLAUDE_DIR="$(dirname "$(command -v claude 2>/dev/null || echo "$HOME/.local/bin
 DOMAIN="gui/$(id -u)"
 
 die() { echo "❌ $*" >&2; exit 1; }
-[ "$(uname)" = "Darwin" ] || die "launchd 只有 macOS 有。Linux 请用 cron，README 里有例子"
+need_macos() { [ "$(uname)" = "Darwin" ] || die "launchd 只有 macOS 有。Linux 请用 cron，README 里有例子"; }
+case "$RUN_INTERVAL" in
+  ''|*[!0-9]*|0) die "RUN_INTERVAL 要写成秒数，比如 3600（每小时）、1800（每 30 分钟）" ;;
+esac
 
-# 每个任务共用的环境：PATH 里要有 node（bridge 用）和 claude（Claude 订阅版用），配置文件固定指向 HOME_DIR/.env
+every() {  # 3600 → 每小时，7200 → 每 2 小时，1800 → 每 30 分钟，90 → 每 90 秒
+  if [ "$1" -eq 3600 ]; then
+    echo "每小时"
+  elif [ $(( $1 % 3600 )) -eq 0 ]; then
+    echo "每 $(( $1 / 3600 )) 小时"
+  elif [ $(( $1 % 60 )) -eq 0 ]; then
+    echo "每 $(( $1 / 60 )) 分钟"
+  else
+    echo "每 $1 秒"
+  fi
+}
+
+# 每个任务共用的环境：PATH 里要有 node（bridge 用）、claude（Claude 订阅版用）和 notify-hub（notify_hub 推送用），
+# 后两个的官方装法都装在 ~/.local/bin；配置文件固定指向 HOME_DIR/.env
 env_xml() {
   cat <<XML
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$NODE_DIR:$CLAUDE_DIR:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>$NODE_DIR:$CLAUDE_DIR:$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
     <key>HOME</key><string>$HOME</string>
     <key>PYTHONUTF8</key><string>1</string>
     <key>MAIL_MONITOR_ENV</key><string>$HOME_DIR/.env</string>
@@ -35,7 +51,7 @@ env_xml() {
 XML
 }
 
-plist_head() {
+plist_head() {  # $1 = Label，$2 = 子命令，$3 = 装上和开机登录时先跑一次（true / false）
   cat <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -47,13 +63,14 @@ plist_head() {
   <key>StandardOutPath</key><string>$LOG_DIR/$2.log</string>
   <key>StandardErrorPath</key><string>$LOG_DIR/$2.log</string>
   <key>ProcessType</key><string>Background</string>
-  <key>RunAtLoad</key><false/>
+  <key>RunAtLoad</key><$3/>
 XML
   env_xml
 }
 
 run_plist() {
-  plist_head "$PREFIX.run" run
+  # 间隔是一小时的话，开机后要等一小时才第一次巡检，所以装上和开机登录时先跑一次
+  plist_head "$PREFIX.run" run true
   cat <<XML
   <key>StartInterval</key><integer>$RUN_INTERVAL</integer>
 </dict>
@@ -62,7 +79,7 @@ XML
 }
 
 digest_plist() {
-  plist_head "$PREFIX.digest" digest
+  plist_head "$PREFIX.digest" digest false
   echo "  <key>StartCalendarInterval</key>"
   echo "  <array>"
   for hour in $DIGEST_HOURS; do
@@ -81,9 +98,18 @@ load() {
   launchctl bootstrap "$DOMAIN" "$AGENTS/$1.plist" 2>/dev/null || launchctl load -w "$AGENTS/$1.plist"
 }
 
+seen_count() {  # 数据库里登记过几封邮件（init 或正式巡检过才有）；看不了时输出 ?
+  [ -f "$HOME_DIR/state.db" ] || { echo 0; return; }
+  command -v sqlite3 >/dev/null 2>&1 || { echo "?"; return; }
+  sqlite3 "$HOME_DIR/state.db" "SELECT COUNT(*) FROM messages" 2>/dev/null || echo "?"
+}
+
 install() {
+  need_macos
   [ -x "$BIN" ] || die "找不到 ${BIN}。先运行 ./scripts/install.sh（或把 MAIL_MONITOR_BIN 指向 mail-monitor）"
   [ -f "$HOME_DIR/.env" ] || die "没有 $HOME_DIR/.env。先按 README 配置好，并跑通 mail-monitor doctor"
+  # 装上就会先巡检一次，没 init 的话会把最近两天的邮件全当成新邮件推一遍
+  [ "$(seen_count)" != 0 ] || die "还没跑过 mail-monitor init：先跑它把现有邮件登记为已见，再装定时任务"
   mkdir -p "$AGENTS" "$LOG_DIR"
   run_plist > "$AGENTS/$PREFIX.run.plist"
   digest_plist > "$AGENTS/$PREFIX.digest.plist"
@@ -92,12 +118,12 @@ install() {
     unload "$label"
     load "$label"
   done
-  echo "✅ 已安装：每 $RUN_INTERVAL 秒巡检一次（$PREFIX.run），每天 $(echo "$DIGEST_HOURS" | sed 's/ /、/g') 点汇总（$PREFIX.digest）"
-  echo "   日志：$LOG_DIR/run.log 和 digest.log"
-  echo "   提醒：第一次先手动跑 mail-monitor init，不然会把现有邮件全推一遍"
+  echo "✅ 已安装：$(every "$RUN_INTERVAL")巡检一次，刚装上先跑一次（${PREFIX}.run）；每天 $(echo "$DIGEST_HOURS" | sed 's/ /、/g') 点汇总（${PREFIX}.digest）"
+  echo "   日志：$LOG_DIR/run.log 和 digest.log；过一会儿用 ./scripts/launchd.sh status 看结果"
 }
 
 uninstall() {
+  need_macos
   for label in "$PREFIX.run" "$PREFIX.digest"; do
     unload "$label"
     rm -f "$AGENTS/$label.plist"
@@ -106,6 +132,7 @@ uninstall() {
 }
 
 status() {
+  need_macos
   for label in "$PREFIX.run" "$PREFIX.digest"; do
     if [ -f "$AGENTS/$label.plist" ]; then
       line="$(launchctl list 2>/dev/null | awk -v l="$label" '$3 == l {print "pid=" $1 " 上次退出码=" $2}')"
@@ -126,5 +153,6 @@ case "${1:-}" in
   install) install ;;
   uninstall) uninstall ;;
   status) status ;;
-  *) echo "用法：$0 install | uninstall | status"; exit 1 ;;
+  print) run_plist; digest_plist ;;
+  *) echo "用法：$0 install | uninstall | status | print"; exit 1 ;;
 esac
