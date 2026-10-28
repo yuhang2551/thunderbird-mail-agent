@@ -12,12 +12,12 @@ import json
 import logging
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
 
+from .config import resolve_binary
 from .llm import LLMError, parse_json_object
 
 log = logging.getLogger(__name__)
@@ -39,15 +39,6 @@ class ClaudeCLIError(LLMError):
     def __init__(self, message: str, *, retryable: bool = True):
         super().__init__(message)
         self.retryable = retryable
-
-
-def resolve_binary(binary: str) -> str:
-    """PATH 里找不到 claude 时，退回官方安装脚本的位置 ~/.local/bin/claude（刚装完的终端窗口、launchd 里常见）。"""
-    if os.sep not in binary and shutil.which(binary) is None:
-        native = Path.home() / ".local" / "bin" / "claude"
-        if native.exists():
-            return str(native)
-    return binary
 
 
 def claude_env() -> dict[str, str]:

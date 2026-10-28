@@ -18,7 +18,7 @@
 | 决策 | 规则先过一遍；规则没定性的交给模型，模型只输出固定字段的 JSON，校验过才用 | `rules.py`、`classify.py`、`llm.py`、`claude_cli.py` |
 | 记忆 | SQLite：处理过哪些邮件、每个发件人是谁、同一话题之前说了什么、你标的答案 | `state.py`、`memory.py` |
 | 行动 | 默认只读。唯一的写操作是给"要管"的邮件打标签，默认关；永远不发信、不删信 | `pipeline.py` |
-| 推送 | 即时消息和早晚汇总，发到终端、Lark 群机器人或 Lark 应用机器人 | `notify.py`、`render.py` |
+| 推送 | 即时消息和早晚汇总，发到终端、Lark 群机器人、Lark 应用机器人，或者交给本机的通知网关 notify-hub | `notify.py`、`render.py` |
 | 调度 | launchd 每 5 分钟跑一次 `run`，每天 9 点、18 点各跑一次 `digest` | `scripts/launchd.sh` |
 
 ## 2. 整体结构
@@ -31,13 +31,16 @@ flowchart LR
         B <-->|"HTTP + 令牌，只在本机"| T["Thunderbird + 扩展<br/>Gmail、学校邮箱"]
         M <--> D[("SQLite<br/>state.db")]
         R["rules.yaml"] --> M
+        M -.->|"可选"| H["notify-hub<br/>通知网关"]
     end
     M -->|"规则没定性的邮件"| A["模型<br/>DeepSeek API 或 Claude 订阅"]
     M -->|"一句话摘要"| K["Lark / 飞书"]
+    H -->|"卡片"| K
 ```
 
 - 邮件一直在你电脑上的 Thunderbird 里。本程序和 Claude Desktop 一样，是 thunderbird-mcp 的一个 MCP 客户端：用 stdio 启动 `mcp-bridge.cjs`，bridge 再带着令牌访问扩展在 127.0.0.1 上开的本地服务。各邮箱的登录和 OAuth 全由 Thunderbird 负责，程序不碰邮箱密码。
 - 离开电脑的只有两样：规则没定性的邮件发给模型，一句话摘要推到 Lark。见第 7 节。
+- 推送可以直接发到 Lark，也可以交给同一台 Mac 上的 [notify-hub](https://github.com/yuhang2551/notify-hub)。它是另一个小程序，几个项目共用，管 Lark 凭证、夜里免打扰、去重、限流和失败重发。为什么这样分，见第 6 节。
 
 ## 3. 一次巡检里发生了什么
 
@@ -163,6 +166,10 @@ flowchart TD
 
 **为什么宁可多推？** 漏掉一封导师或面试邮件的代价，比多看一条推送大得多。
 
+**为什么推送交给 notify-hub，不在这里做免打扰和重发？** 免打扰、去重、限流、失败重发是每个会发通知的程序都要的。写在邮件监控里，下一个项目（实验脚本、求职助手）又得写一遍。notify-hub 把这些做成一个本机命令，邮件监控只决定这封多急、标题和正文写什么，交出去就算完成。交接是用子进程调它的命令行，不 import 它的 Python 包：两个程序各有各的虚拟环境，命令行就是它们之间的接口。每封邮件带着自己的 id 作为 `--key` 交过去，万一同一封交了两次，也只推一次。直接推 Lark 的两种方式还留着，不装 notify-hub 也能用。
+
+**为什么只有规则写了 `urgency: high` 的才夜里也推？** 夜里把人叫醒的代价很高。规则是你自己写的，可信；模型判断的「紧急」会被邮件措辞带偏，钓鱼邮件最爱写"紧急"。所以模型判断的紧急照样写在卡片上，只是免打扰时段先存着，结束后合成一张卡发。
+
 ## 7. 数据去哪了
 
 | 数据 | 存在哪、发给谁 |
@@ -171,8 +178,8 @@ flowchart TD
 | 判断记录、发件人身份、你的标注 | 本机的 `~/.mail-monitor/state.db`，只有标题和一句话摘要 |
 | 规则没定性的邮件：发件人、收件人、主题、时间、正文前 4000 字、相关记忆、你的画像 | 你配置的模型：API key 版默认发给 DeepSeek，Claude 订阅版发给 Anthropic。各后端的区别见 [模型后端](model-backends.md#数据去哪了) |
 | 规则直接定性的邮件（验证码、订阅等） | 不发给任何模型 |
-| 推送：谁、什么事、期限、建议、主题和时间 | Lark。不含正文；没有模型判断时，"什么事"是主题加预览的前 80 个字 |
-| API key、Lark 凭证 | `~/.mail-monitor/.env`，`install.sh` 生成时权限设成 600，不进仓库 |
+| 推送：谁、什么事、期限、建议、主题和时间 | Lark。不含正文；没有模型判断时，"什么事"是主题加预览的前 80 个字。经过 notify-hub 时，也存在本机 notify-hub 的发件箱 `~/.notify-hub/outbox.db` 里 |
+| API key、Lark 凭证 | `~/.mail-monitor/.env`，`install.sh` 生成时权限设成 600，不进仓库。用 notify-hub 时，Lark 凭证在它自己的 `~/.notify-hub/.env` 里，这边不用填 |
 
 ## 8. 出错时会怎样
 
@@ -183,7 +190,9 @@ flowchart TD
 | 读不到正文 | 用邮件预览判断 |
 | 模型超时、报错、回来的不是 JSON | 重试一次，再失败按"拿不准"推送 |
 | 没有配置模型 | 规则没定性的邮件全部按"拿不准"推送 |
-| Lark 推送失败 | 转进汇总，下次 `digest` 一起发 |
+| 直接推 Lark 失败 | 转进汇总，下次 `digest` 一起发 |
+| 经过 notify-hub，Lark 发不出去 | 消息留在 notify-hub 的发件箱里自动重发；对邮件监控来说已经交出去了 |
+| notify-hub 本身运行不了（没装、找不到命令、60 秒没返回） | 和直接推失败一样，转进汇总 |
 | 电脑睡眠 | launchd 不跑，醒来补跑一次；离开超过 2 天的话用 `run --days 7` 补 |
 | 同一封邮件在两个收件箱 | 按 id 合并，只判断一次 |
 
@@ -204,6 +213,6 @@ flowchart TD
 | 想加 | 改哪里 |
 |---|---|
 | 新规则 | `rules.yaml`，不用改代码 |
-| 新的推送渠道（Telegram、邮件……） | `notify.py` 里实现一个 `send(text)`，在 `build_notifier` 里注册 |
+| 新的推送渠道（Telegram、邮件……） | 加到 notify-hub 里，所有项目都能用；或者在 `notify.py` 里实现一个 `send(push)`（`Push` 里有纯文本，也有卡片用的标题、正文和级别），在 `build_notifier` 里注册 |
 | 新的模型后端 | 实现 `chat_json(system, user) -> dict`，见 [模型后端](model-backends.md) |
 | 新的行动（建待办、存草稿……） | `pipeline._settle`，照打标签的样子做成默认关的开关 |

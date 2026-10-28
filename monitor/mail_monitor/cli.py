@@ -15,7 +15,7 @@ from .config import RETIRED_MODELS, Settings, load_settings
 from .mailbox import Mailbox, MailboxError
 from .models import MessageHeader
 from .memory import SOURCE_LABEL
-from .notify import NotifyError, build_notifier
+from .notify import NotifyError, NotifyHubNotifier, Push, build_notifier
 from .render import LABEL, fmt_time
 from .rules import RuleSet
 from .state import State
@@ -103,7 +103,10 @@ def doctor() -> None:
 
     try:
         notifier = build_notifier(settings)
-        typer.echo(f"✅ 推送：{notifier.name}")
+        if isinstance(notifier, NotifyHubNotifier):
+            typer.echo(f"✅ 推送：notify_hub（{notifier.version()}，{notifier.binary}）")
+        else:
+            typer.echo(f"✅ 推送：{notifier.name}")
     except NotifyError as exc:
         ok = False
         typer.echo(f"❌ 推送：{exc}")
@@ -316,21 +319,24 @@ def notify_test(text: str = typer.Argument("邮箱监控 Agent 测试消息 ✅"
     """用当前配置的推送后端发一条测试消息。"""
     settings = _settings()
 
-    async def go() -> None:
+    async def go() -> str:
         notifier = build_notifier(settings)
         try:
-            await notifier.send(text)
+            # 按紧急发：测试消息要马上到手机，不能被 notify-hub 的免打扰时段攒着
+            await notifier.send(Push.plain(text, level="urgent"))
+            return getattr(notifier, "last_output", "")
         finally:
             close = getattr(notifier, "aclose", None)
             if close:
                 await close()
 
     try:
-        asyncio.run(go())
-        typer.echo(f"✅ 已通过 {settings.notify_backend} 发送")
+        output = asyncio.run(go())
     except NotifyError as exc:
         typer.echo(f"❌ {exc}")
         raise typer.Exit(code=1)
+    # notify-hub 推不出去时会先存着、之后重发，它自己的话最准
+    typer.echo(f"notify-hub：{output}" if output else f"✅ 已通过 {settings.notify_backend} 发送")
 
 
 if __name__ == "__main__":  # pragma: no cover

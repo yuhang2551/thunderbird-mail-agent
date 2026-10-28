@@ -1,3 +1,4 @@
+import json
 import shlex
 import sys
 from pathlib import Path
@@ -70,3 +71,22 @@ def test_doctor_and_init_explain_a_closed_thunderbird(tmp_path, monkeypatch):
 
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 1 and "连不上 Thunderbird" in result.output, result.output
+
+
+def test_notify_test_through_notify_hub(tmp_path, monkeypatch, fake_notify_hub):
+    binary, log = fake_notify_hub
+    env = tmp_path / ".env"
+    env.write_text(f"MAIL_MONITOR_HOME={tmp_path}\nMAIL_MONITOR_NOTIFY=notify_hub\nMAIL_MONITOR_NOTIFY_HUB_BIN={binary}\n", encoding="utf-8")
+    monkeypatch.setenv("MAIL_MONITOR_ENV", str(env))
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["notify-test"])
+    assert result.exit_code == 0 and "notify-hub：✅ 已推送（#1）" in result.output, result.output
+    call = json.loads(log.read_text(encoding="utf-8"))
+    assert call["args"][3:5] == ["--level", "urgent"]  # 测试消息按紧急发，免打扰时段也马上到
+    assert call["args"][-1] == "邮箱监控 Agent 测试消息 ✅"
+
+    monkeypatch.setenv("FAKE_NOTIFY_HUB_MODE", "bad")
+    result = runner.invoke(app, ["notify-test"])
+    assert result.exit_code == 1 and "退出码 2" in result.output
+

@@ -51,10 +51,17 @@ After installing, run `mail-monitor init` once to register existing mail as seen
 **Nothing arrives on my phone**
 
 - Run `mail-monitor notify-test` first and read the error.
+- With notify_hub: run `notify-hub test` first; the mail monitor can only get through once that does. If `mail-monitor doctor` shows no notify-hub version, the command cannot be found: run `which notify-hub` in a terminal to see where it is and put that path in `MAIL_MONITOR_NOTIFY_HUB_BIN` in `.env`. If `notify-test` says the message was not sent and stays in the outbox, notify-hub cannot reach Lark and will retry by itself; `notify-hub status` shows how many messages are waiting.
 - App bot: is the permission on (`im:message:send_as_bot`), is the version published, is the bot in that group, and is `LARK_RECEIVE_ID` right (`oc_` is a chat, `ou_` is you)? If you also set `LARK_RECEIVE_ID_TYPE`, it must match the id (`chat_id` goes with a group id, `open_id` with your user id); when unsure, delete that line and the program works it out.
 - Group custom bot: if the group has signature checks on, `LARK_WEBHOOK_SECRET` must be set.
 - For Feishu (the China edition) set `LARK_DOMAIN` to `https://open.feishu.cn`.
 - Mail whose push failed is not lost; it goes into the next digest.
+
+**Mail that arrived at night only reaches me in the morning**
+
+With notify_hub, that is notify-hub's quiet hours: normal messages between 23:00 and 08:00 are held and go out as one combined card at 08:00. Rules with `urgency: high` (the advisor rule in `rules.example.yaml`) are sent as urgent and are delivered at night too; to get someone's mail at night, write such a rule for them. The model's "urgent" does not count, because an email's wording can sway it. Change the quiet hours in notify-hub's `.env`: `NOTIFY_HUB_QUIET_HOURS=23:00-08:00`, or `off` to turn them off.
+
+notify-hub also sends at most 20 messages per source per hour; anything beyond that goes into its daily 18:00 digest. You will rarely hit it; the setting is `NOTIFY_HUB_RATE_LIMIT`.
 
 **Too many pushes**
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 from pathlib import Path
 from typing import Any, Literal
 
@@ -14,7 +15,7 @@ from dotenv import dotenv_values
 from pydantic import BaseModel, Field
 
 DEFAULT_HOME = Path.home() / ".mail-monitor"
-NotifyBackend = Literal["console", "lark_webhook", "lark_app"]
+NotifyBackend = Literal["console", "notify_hub", "lark_webhook", "lark_app"]
 LLMBackend = Literal["api", "claude"]
 
 
@@ -53,6 +54,7 @@ class Settings(BaseModel):
 
     # 推送
     notify_backend: NotifyBackend = "console"
+    notify_hub_bin: str = "notify-hub"  # notify_hub 推送调用的命令；launchd 下找不到时写完整路径
     lark_domain: str = "https://open.larksuite.com"  # 飞书国内版改成 https://open.feishu.cn
     lark_webhook_url: str | None = None
     lark_webhook_secret: str | None = None
@@ -99,6 +101,16 @@ class Settings(BaseModel):
         return {}
 
 
+def resolve_binary(binary: str) -> str:
+    """PATH 里找不到命令时，退回 ~/.local/bin 下的同名命令：claude 的官方安装脚本和 uv tool 都装在那里，
+    刚装完的终端窗口、launchd 里 PATH 常常还没有它。"""
+    if os.sep not in binary and shutil.which(binary) is None:
+        local = Path.home() / ".local" / "bin" / binary
+        if local.exists():
+            return str(local)
+    return binary
+
+
 # DeepSeek 2026-07-24 停用的旧模型名 → 现在该用的
 RETIRED_MODELS = {"deepseek-chat": "deepseek-flash", "deepseek-reasoner": "deepseek-flash"}
 
@@ -127,6 +139,7 @@ ENV_MAP: dict[str, str] = {
     "MAIL_MONITOR_CLAUDE_MODEL": "claude_model",
     "MAIL_MONITOR_CLAUDE_TIMEOUT": "claude_timeout",
     "MAIL_MONITOR_NOTIFY": "notify_backend",
+    "MAIL_MONITOR_NOTIFY_HUB_BIN": "notify_hub_bin",
     "LARK_DOMAIN": "lark_domain",
     "LARK_WEBHOOK_URL": "lark_webhook_url",
     "LARK_WEBHOOK_SECRET": "lark_webhook_secret",

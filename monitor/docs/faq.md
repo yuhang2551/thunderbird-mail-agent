@@ -51,10 +51,17 @@ PYTHON="$(~/.local/bin/uv python find 3.13)" ./scripts/install.sh
 **手机上没收到**
 
 - 先跑 `mail-monitor notify-test`，看它报什么错。
+- 用 notify_hub 的：先跑 `notify-hub test`，它通了邮件监控才会通。`mail-monitor doctor` 里看不到 notify-hub 的版本，就是找不到这个命令：终端里 `which notify-hub` 看它装在哪，写进 `.env` 的 `MAIL_MONITOR_NOTIFY_HUB_BIN`。`notify-test` 说"没发出去，留在发件箱里"，是 notify-hub 连不上 Lark，它会自己重发，`notify-hub status` 能看到发件箱里还有几条。
 - 应用机器人：权限开了没有（`im:message:send_as_bot`），版本发布了没有，机器人在不在那个群里，`LARK_RECEIVE_ID` 对不对（`oc_` 开头是群，`ou_` 开头是你本人）；另外写了 `LARK_RECEIVE_ID_TYPE` 的话，要和 id 对得上（`chat_id` 配群 id，`open_id` 配你的用户 id），不确定就删掉这一行让程序自己判断。
 - 群自定义机器人：群里开了签名校验的话，`LARK_WEBHOOK_SECRET` 要填。
 - 飞书国内版要把 `LARK_DOMAIN` 改成 `https://open.feishu.cn`。
 - 推送失败的邮件不会丢，会转进下一次汇总。
+
+**夜里来的邮件，早上才收到**
+
+用 notify_hub 推送时，这是 notify-hub 的免打扰：23:00 到 08:00 之间的普通消息先存着，08:00 合成一张卡发。规则里写了 `urgency: high` 的（`rules.example.yaml` 里导师那条）按紧急发，夜里也推；想让某个人的邮件夜里也推，就给他写一条这样的规则。模型判断的"紧急"不算，因为它会被邮件措辞带偏。免打扰时段在 notify-hub 的 `.env` 里改：`NOTIFY_HUB_QUIET_HOURS=23:00-08:00`，写 `off` 关掉。
+
+另外 notify-hub 对同一个来源一小时最多推 20 条，再多的进它每天 18:00 的汇总，一般碰不到；要改是 `NOTIFY_HUB_RATE_LIMIT`。
 
 **推得太多**
 

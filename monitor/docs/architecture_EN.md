@@ -18,7 +18,7 @@ An agent is usually split into perception, decision, action, memory and push. Ea
 | Decision | Rules go first; whatever they do not settle goes to the model, which only returns JSON with fixed fields, used only after validation | `rules.py`, `classify.py`, `llm.py`, `claude_cli.py` |
 | Memory | SQLite: which mail was handled, who each sender is, what the same thread said before, your labels | `state.py`, `memory.py` |
 | Action | Read-only by default. The one write is tagging "needs action" mail, off by default; it never sends or deletes | `pipeline.py` |
-| Push | Instant messages and the morning and evening digest, to the terminal, a Lark group bot or a Lark app bot | `notify.py`, `render.py` |
+| Push | Instant messages and the morning and evening digest, to the terminal, a Lark group bot, a Lark app bot, or handed to notify-hub, a local notification gateway | `notify.py`, `render.py` |
 | Scheduling | launchd runs `run` every 5 minutes and `digest` at 09:00 and 18:00 | `scripts/launchd.sh` |
 
 ## 2. The big picture
@@ -31,13 +31,16 @@ flowchart LR
         B <-->|"HTTP + token, local only"| T["Thunderbird + add-on<br/>Gmail, university mail"]
         M <--> D[("SQLite<br/>state.db")]
         R["rules.yaml"] --> M
+        M -.->|"optional"| H["notify-hub<br/>notification gateway"]
     end
     M -->|"mail the rules did not settle"| A["Model<br/>DeepSeek API or Claude subscription"]
     M -->|"one-line summary"| K["Lark / Feishu"]
+    H -->|"card"| K
 ```
 
 - Mail stays in Thunderbird on your computer. Like Claude Desktop, this program is an MCP client of thunderbird-mcp: it starts `mcp-bridge.cjs` over stdio, and the bridge reaches the add-on's local server on 127.0.0.1 with a token. Thunderbird handles every mailbox's sign-in and OAuth; the program never sees a mailbox password.
 - Only two things leave the computer: mail the rules did not settle goes to the model, and a one-line summary goes to Lark. See section 7.
+- Pushes can go straight to Lark, or be handed to [notify-hub](https://github.com/yuhang2551/notify-hub) on the same Mac. It is a separate small program shared by several projects that owns the Lark credentials, night-time quiet hours, de-duplication, rate limiting and retries. Why the split: section 6.
 
 ## 3. One check, step by step
 
@@ -165,6 +168,10 @@ A sender's identity has three sources, from highest to lowest priority: what you
 
 **Why push too much rather than too little?** Missing one email from your advisor or an interviewer costs far more than reading one extra push.
 
+**Why hand pushes to notify-hub instead of doing quiet hours and retries here?** Quiet hours, de-duplication, rate limiting and retries are needed by every program that sends notifications. Written into the mail monitor, the next project (an experiment script, the job-search assistant) would have to write them again. notify-hub turns them into one local command: the mail monitor only decides how urgent a message is and what its title and body say, and once handed over, its job is done. The hand-over runs notify-hub's command line in a subprocess rather than importing its Python package: each program has its own virtual environment, and the command line is the interface between them. Each message is handed over with its mail id as `--key`, so even if the same mail were handed over twice it would be pushed once. The two direct Lark routes remain, so notify-hub is optional.
+
+**Why do only rules with `urgency: high` push at night?** Waking you up at night is expensive. Rules are written by you and can be trusted; the model's "urgent" can be swayed by an email's wording, and phishing loves the word "urgent". So a model-judged urgent mail still says so on its card, but during quiet hours it is held and goes out in one combined card when they end.
+
 ## 7. Where your data goes
 
 | Data | Where it is kept or sent |
@@ -173,8 +180,8 @@ A sender's identity has three sources, from highest to lowest priority: what you
 | Verdicts, sender identities, your labels | `~/.mail-monitor/state.db` on your computer, with subjects and one-line summaries only |
 | Mail the rules did not settle: sender, recipients, subject, time, the first 4,000 characters of the body, related memory, your profile | The model you configured: DeepSeek by default for the API-key version, Anthropic for the Claude subscription version. How the backends differ: [Model backends](model-backends_EN.md#where-your-data-goes) |
 | Mail a rule settles outright (verification codes, newsletters …) | No model |
-| Pushes: who, what, deadline, suggestion, subject and time | Lark. No bodies; without a model verdict, "what" is the subject plus the first 80 characters of the preview |
-| API key, Lark credentials | `~/.mail-monitor/.env`, created by `install.sh` with mode 600, never in the repository |
+| Pushes: who, what, deadline, suggestion, subject and time | Lark. No bodies; without a model verdict, "what" is the subject plus the first 80 characters of the preview. Through notify-hub they are also kept in its local outbox, `~/.notify-hub/outbox.db` |
+| API key, Lark credentials | `~/.mail-monitor/.env`, created by `install.sh` with mode 600, never in the repository. With notify-hub, the Lark credentials live in its own `~/.notify-hub/.env` and are not needed here |
 
 ## 8. When something fails
 
@@ -185,7 +192,9 @@ A sender's identity has three sources, from highest to lowest priority: what you
 | A body cannot be read | The preview is used |
 | The model times out, errors, or returns something that is not JSON | One retry, then pushed as "unsure" |
 | No model configured | Everything the rules do not settle is pushed as "unsure" |
-| A Lark push fails | It moves into the digest and goes out with the next `digest` |
+| A direct Lark push fails | It moves into the digest and goes out with the next `digest` |
+| Through notify-hub, Lark cannot be reached | The message stays in notify-hub's outbox and is retried automatically; for the mail monitor it has been handed over |
+| notify-hub itself cannot run (not installed, command not found, no answer within 60 seconds) | Same as a failed direct push: it moves into the digest |
 | The Mac sleeps | launchd skips the runs and catches up once on wake; after more than 2 days away, catch up with `run --days 7` |
 | The same message in two inboxes | Merged by id and judged once |
 
@@ -206,6 +215,6 @@ A sender's identity has three sources, from highest to lowest priority: what you
 | To add | Change |
 |---|---|
 | A new rule | `rules.yaml`, no code |
-| A new push channel (Telegram, email …) | Implement `send(text)` in `notify.py` and register it in `build_notifier` |
+| A new push channel (Telegram, email …) | Add it to notify-hub so every project can use it; or implement `send(push)` in `notify.py` (a `Push` carries the plain text plus a card title, body and level) and register it in `build_notifier` |
 | A new model backend | Implement `chat_json(system, user) -> dict`; see [Model backends](model-backends_EN.md) |
 | A new action (create a task, save a draft …) | `pipeline._settle`, as an off-by-default switch like tagging |

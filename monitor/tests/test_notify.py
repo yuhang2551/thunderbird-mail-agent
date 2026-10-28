@@ -6,7 +6,16 @@ import json
 import httpx
 import pytest
 
-from mail_monitor.notify import LarkAppNotifier, LarkWebhookNotifier, NotifyError, build_notifier, infer_receive_id_type, lark_webhook_sign
+from mail_monitor.notify import (
+    LarkAppNotifier,
+    LarkWebhookNotifier,
+    NotifyError,
+    NotifyHubNotifier,
+    Push,
+    build_notifier,
+    infer_receive_id_type,
+    lark_webhook_sign,
+)
 from mail_monitor.config import Settings
 
 
@@ -23,7 +32,7 @@ async def test_webhook_sends_text_with_signature():
         return httpx.Response(200, json={"code": 0, "msg": "success"})
 
     notifier = LarkWebhookNotifier("https://open.larksuite.com/open-apis/bot/v2/hook/abc", "secret", transport=httpx.MockTransport(handler))
-    await notifier.send("你好")
+    await notifier.send(Push.plain("你好"))
     body = json.loads(seen[0].content)
     assert body["msg_type"] == "text" and body["content"] == {"text": "你好"}
     assert body["sign"] == lark_webhook_sign("secret", int(body["timestamp"]))
@@ -35,7 +44,7 @@ async def test_webhook_error_code_raises():
 
     notifier = LarkWebhookNotifier("https://example.invalid/hook", transport=httpx.MockTransport(handler))
     with pytest.raises(NotifyError, match="19021"):
-        await notifier.send("x")
+        await notifier.send(Push.plain("x"))
 
 
 async def test_app_notifier_fetches_token_then_sends():
@@ -53,8 +62,8 @@ async def test_app_notifier_fetches_token_then_sends():
         return httpx.Response(200, json={"code": 0, "data": {"message_id": "om_1"}})
 
     notifier = LarkAppNotifier(domain="https://open.larksuite.com", app_id="cli_x", app_secret="s", receive_id="ou_me", transport=httpx.MockTransport(handler))
-    await notifier.send("hi")
-    await notifier.send("hi")
+    await notifier.send(Push.plain("hi"))
+    await notifier.send(Push.plain("hi"))
     paths = [c.url.path for c in calls]
     assert paths.count("/open-apis/auth/v3/tenant_access_token/internal") == 1  # token 有缓存
     assert paths.count("/open-apis/im/v1/messages") == 2
@@ -79,7 +88,7 @@ async def test_app_notifier_lists_chats_and_looks_up_open_id():
     assert await notifier.list_chats() == [{"chat_id": "oc_1", "name": "邮件雷达"}, {"chat_id": "oc_2", "name": "第二群"}]
     assert await notifier.lookup_open_id("me@example.com") == "ou_me"
     with pytest.raises(NotifyError, match="LARK_RECEIVE_ID"):
-        await notifier.send("x")
+        await notifier.send(Push.plain("x"))
 
 
 def test_build_notifier_validates_config():
@@ -121,7 +130,7 @@ async def test_app_notifier_sends_to_chat_when_type_left_empty():
     assert notifier.receive_id_type == "chat_id"
     await notifier.aclose()
     notifier._client = httpx.AsyncClient(base_url="https://open.larksuite.com", transport=httpx.MockTransport(handler))
-    await notifier.send("hi")
+    await notifier.send(Push.plain("hi"))
     await notifier.aclose()
     assert seen == ["chat_id"]
 
@@ -142,3 +151,65 @@ def test_empty_receive_id_type_in_env_file_means_infer(tmp_path):
     settings = load_settings(env)
     assert settings.lark_receive_id_type is None
     assert build_notifier(settings).receive_id_type == "chat_id"
+
+
+def test_push_plain_splits_title_and_body():
+    push = Push.plain("第一行\n第二行\n第三行", level="urgent")
+    assert push.title == "第一行" and push.body == "第二行\n第三行" and push.level == "urgent"
+    assert push.text == "第一行\n第二行\n第三行" and push.key is None
+
+
+def _calls(log):
+    return [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+
+
+def test_notify_hub_command_puts_the_title_after_the_options():
+    command = NotifyHubNotifier("/x/notify-hub").command(Push(text="t", title="-奇怪的标题", body="b", level="urgent", key="<m-1@x>"))
+    assert command == ["/x/notify-hub", "send", "--body", "-", "--level", "urgent", "--source", "mail", "--key", "<m-1@x>", "--", "-奇怪的标题"]
+
+
+async def test_notify_hub_gets_the_body_on_stdin(fake_notify_hub):
+    binary, log = fake_notify_hub
+    notifier = NotifyHubNotifier(binary)
+    await notifier.send(Push(text="全文", title="导师：周五前交数字", body="需要处理 · 紧急\n期限：周五", key="<prof-1@x>"))
+    [call] = _calls(log)
+    assert call["args"] == ["send", "--body", "-", "--level", "normal", "--source", "mail", "--key", "<prof-1@x>", "--", "导师：周五前交数字"]
+    assert call["body"] == "需要处理 · 紧急\n期限：周五"
+    assert notifier.last_output == "✅ 已推送（#1）"
+
+
+async def test_notify_hub_keeping_a_message_for_later_is_not_a_failure(fake_notify_hub, monkeypatch):
+    """notify-hub 连不上 Lark 时把消息存着、之后自己重发，退出码是 0：交出去了就算数，不转入汇总。"""
+    monkeypatch.setenv("FAKE_NOTIFY_HUB_MODE", "queued")
+    notifier = NotifyHubNotifier(fake_notify_hub[0])
+    await notifier.send(Push.plain("x"))
+    assert notifier.last_output.startswith("⏳ 没发出去")
+
+
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [("bad", "退出码 2：❌ 级别只能是"), ("slow", "没有返回")],
+)
+async def test_notify_hub_failures_raise(fake_notify_hub, monkeypatch, mode, message):
+    monkeypatch.setenv("FAKE_NOTIFY_HUB_MODE", mode)
+    with pytest.raises(NotifyError, match=message):
+        await NotifyHubNotifier(fake_notify_hub[0], timeout=1).send(Push.plain("x"))
+
+
+async def test_notify_hub_not_installed(tmp_path):
+    notifier = NotifyHubNotifier(str(tmp_path / "missing" / "notify-hub"))
+    with pytest.raises(NotifyError, match="MAIL_MONITOR_NOTIFY_HUB_BIN"):
+        await notifier.send(Push.plain("x"))
+    with pytest.raises(NotifyError, match="uv tool install"):
+        notifier.version()
+
+
+def test_notify_hub_version_and_local_bin_fallback(fake_notify_hub, tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".local" / "bin" / "notify-hub").symlink_to(fake_notify_hub[0])  # uv tool install 装到这里
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")  # launchd 里 PATH 没有 ~/.local/bin
+    notifier = build_notifier(Settings(notify_backend="notify_hub"))
+    assert notifier.name == "notify_hub" and notifier.binary == str(home / ".local" / "bin" / "notify-hub")
+    assert notifier.version() == "notify-hub 0.2.1"

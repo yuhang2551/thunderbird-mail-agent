@@ -72,7 +72,7 @@ On Linux use cron:
 |---|---|---|
 | Model | `MAIL_MONITOR_LLM`, `DEEPSEEK_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_EXTRA_BODY`, `MAIL_MONITOR_CLAUDE_MODEL` | `api` (default) calls any OpenAI-compatible endpoint; by default DeepSeek's `deepseek-flash`, with its default thinking mode turned off. `claude` runs the Claude Code already signed in on your Mac and uses your Claude Pro / Max subscription, no key needed; the model defaults to `sonnet`. Works with neither: mail the rules do not settle is pushed as "unsure". See [Model backends](docs/model-backends_EN.md) |
 | Profile | `MAIL_MONITOR_PROFILE` | One sentence about you (what you study, what job you are looking for, who your advisor is), added to the prompt. Without it the model only knows "a graduate student who is also job hunting" |
-| Push | `MAIL_MONITOR_NOTIFY` = `console` / `lark_app` / `lark_webhook` | Start with `console` to watch it in the terminal. An app bot needs `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_RECEIVE_ID`; a group custom bot only needs `LARK_WEBHOOK_URL` (optional `LARK_WEBHOOK_SECRET`) |
+| Push | `MAIL_MONITOR_NOTIFY` = `console` / `notify_hub` / `lark_app` / `lark_webhook` | Start with `console` to watch it in the terminal. If you have [notify-hub](https://github.com/yuhang2551/notify-hub) installed, use `notify_hub`: the Lark settings live there, so nothing to fill in here (set `MAIL_MONITOR_NOTIFY_HUB_BIN` to the full path if the command is not found). Pushing directly, an app bot needs `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_RECEIVE_ID`; a group custom bot only needs `LARK_WEBHOOK_URL` (optional `LARK_WEBHOOK_SECRET`) |
 | Rules | `MAIL_MONITOR_RULES` (default `~/.mail-monitor/rules.yaml`) | See [rules.example.yaml](rules.example.yaml) |
 | Accounts | `MAIL_MONITOR_ACCOUNTS` | Watch only some accounts; default is every inbox |
 | Actions | `MAIL_MONITOR_ACTION_TAG` | Tag "needs action" mail in Thunderbird, default `false` |
@@ -81,11 +81,18 @@ The full list is in [.env.example](.env.example). Secrets live only in `~/.mail-
 
 ### Pushing to Feishu / Lark
 
-Two routes, pick one:
+Three routes, pick one:
 
-**A. Group custom bot (simplest, but some tenants do not offer it)**: in desktop Lark open a group → Settings → Bots → Add bot → Custom bot → copy the webhook. In `.env`: `MAIL_MONITOR_NOTIFY=lark_webhook`, `LARK_WEBHOOK_URL=…`, optionally `LARK_WEBHOOK_SECRET=…` (signature check).
+**A. Hand it to notify-hub (recommended)**: [notify-hub](https://github.com/yuhang2551/notify-hub) is a local notification gateway. Lark credentials, night-time quiet hours, de-duplication and retries are set up there once, and the mail monitor just hands its messages over. Install it following its README until `notify-hub test` reaches your phone, then put `MAIL_MONITOR_NOTIFY=notify_hub` in `.env`; when `mail-monitor doctor` shows the notify-hub version, it is connected. Then:
 
-**B. App bot (through the developer console; can message you directly)**:
+- Each instant push is a card titled "who: what", so the phone notification tells you at a glance.
+- Rules with `urgency: high` (your advisor, say) are sent as urgent: a red card, delivered at night too. Everything else, including mail the model judged urgent, is held during quiet hours (23:00–08:00 by default) and arrives as one combined card at 08:00.
+- The morning and evening digest is still sent by `mail-monitor digest`, as one "邮件汇总 · N 封" (mail digest · N messages) card.
+- A message that cannot be delivered stays in notify-hub's outbox and is retried automatically. If notify-hub itself cannot run (not installed, command not found), the mail moves into the digest, so nothing is lost, just as with direct pushes.
+
+**B. Group custom bot (simplest, but some tenants do not offer it)**: in desktop Lark open a group → Settings → Bots → Add bot → Custom bot → copy the webhook. In `.env`: `MAIL_MONITOR_NOTIFY=lark_webhook`, `LARK_WEBHOOK_URL=…`, optionally `LARK_WEBHOOK_SECRET=…` (signature check).
+
+**C. App bot (through the developer console; can message you directly)**:
 
 1. [open.larksuite.com](https://open.larksuite.com) (open.feishu.cn for Feishu) → Developer console → create a custom app and name it. If you already have an app of your own (a bridge bot, say), reuse it and skip to step 3.
 2. App page → Add capability → **Bot**.
@@ -113,6 +120,17 @@ Instant (needs action or unsure); the text is in Chinese by default because the 
 事：约下周二 10 点线上面试，明天前确认     ← what: online interview next Tuesday 10:00, confirm by tomorrow
 期限：2026-10-14                           ← deadline
 建议：回复确认时间                         ← suggested action: reply to confirm the time
+主题：Interview invitation - AI Agent Engineer | 10-13 15:02
+```
+
+Through notify-hub it is a card with the same content, with "who: what" moved into the title:
+
+```
+量化公司 HR：约下周二 10 点线上面试，明天前确认      ← title: who: what
+──────────────────────────
+需要处理 · 紧急 · Gmail
+期限：2026-10-14
+建议：回复确认时间
 主题：Interview invitation - AI Agent Engineer | 10-13 15:02
 ```
 
@@ -145,7 +163,7 @@ Why each step is designed this way, and what happens when something fails, is in
 ## Where your data goes
 
 - Mail the rules do not settle (sender, subject, time, the first 4,000 characters of the body, related memory) goes to the model you configured; mail a rule settles outright, such as verification codes and newsletters, does not.
-- A push to Lark carries only the one-line summary, never the body.
+- A push to Lark carries only the one-line summary, never the body. Through notify-hub, these summaries are also kept in notify-hub's local outbox (`~/.notify-hub/outbox.db`).
 - Verdicts are stored locally in `~/.mail-monitor/state.db`, without bodies; secrets live only in `~/.mail-monitor/.env`.
 
 Who each model backend sends data to, and how to keep one mailbox away from the model entirely, is in [Model backends](docs/model-backends_EN.md#where-your-data-goes).
@@ -165,7 +183,7 @@ Use it for a week or two and label a few dozen messages and you have numbers for
 ## Development
 
 ```bash
-pytest            # tests/fake_server.py stands in for thunderbird-mcp and fake_claude.py for claude, so no Thunderbird or account is needed
+pytest            # tests/fake_server.py stands in for thunderbird-mcp, fake_claude.py for claude and fake_notify_hub.py for notify-hub, so no Thunderbird or account is needed
 ```
 
 | Path | Contents |
@@ -175,10 +193,10 @@ pytest            # tests/fake_server.py stands in for thunderbird-mcp and fake_
 | `mail_monitor/memory.py`, `state.py` | Memory: handled mail, sender identities, thread history and your labels, all in SQLite |
 | `mail_monitor/classify.py`, `llm.py`, `claude_cli.py` | Verdicts: prompt, fixed-schema JSON output, Pydantic validation, fallback; `llm.py` is the API-key version, `claude_cli.py` the Claude subscription version |
 | `mail_monitor/pipeline.py` | One complete check from fetch to record |
-| `mail_monitor/notify.py`, `render.py` | Push: console / group-bot webhook / app bot; message text |
+| `mail_monitor/notify.py`, `render.py` | Push: console / notify-hub / group-bot webhook / app bot; message text and card title and body |
 | `mail_monitor/cli.py` | Command line |
 | `scripts/` | `install.sh` (environment), `launchd.sh` (scheduling) |
-| `tests/` | The fake thunderbird-mcp (`fake_server.py`), a bridge whose Thunderbird is closed (`dead_bridge.py`), a fake `claude` command (`fake_claude.py`) and 88 tests |
+| `tests/` | The fake thunderbird-mcp (`fake_server.py`), a bridge whose Thunderbird is closed (`dead_bridge.py`), a fake `claude` command (`fake_claude.py`), a fake `notify-hub` command (`fake_notify_hub.py`) and 99 tests |
 | `docs/` | Architecture, model backends, FAQ |
 
 `tests/fake_server.py` copies the tool names, parameters and return shapes of upstream v0.9.2, so the whole pipeline runs in the cloud or in CI; switching to the real bridge is only a different start command.
