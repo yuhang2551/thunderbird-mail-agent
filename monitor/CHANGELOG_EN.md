@@ -6,9 +6,28 @@ Recorded increment by increment: what each step added, how far it was verified o
 
 ## Next
 
-1. Check that the next two digest cards arrive: 18:00 on 10-28 is the first digest at the new times and carries the 11 messages held during the day; the next morning's 08:00 digest carries what quiet hours held overnight.
+1. With the new scheduled job installed, check that digests arrive at 08:00, 12:00 and 18:00 Dubai time, that the 08:00 one carries what quiet hours held overnight, and whether the new card reads well on the phone.
 2. Use it for a week: label with `review`, check the miss and noise rates with `eval`, and tune the rules and prompt from the results. Along the way, replace the example address in the advisor rule of `rules.yaml` (until then nothing is pushed at night, it all waits for 08:00) and set `MAIL_MONITOR_PROFILE`.
 3. The ChatGPT subscription version (designed in [Model backends](docs/model-backends_EN.md), not urgent).
+
+## 2026-10-28 · Digests follow the MAIL_MONITOR_TZ clock, and a new digest card
+
+**Why**
+
+- On 10-28 a digest arrived at 14:00 Dubai time, although digests were set for 08:00, 12:00 and 18:00. The Mac's time zone is the UAE and `MAIL_MONITOR_TZ` is Dubai too; the culprit is launchd, which reads the time zone only at boot. The Mac was most likely last booted on Beijing time and the zone changed afterwards without a restart, so launchd kept counting on Beijing time and the "18:00" digest arrived at 14:00 in Dubai. This is inferred: the arrival time matches exactly and there is [a report of the same thing](https://serpapi.com/blog/2025-ai-everywhere-yet-a-reboot-still-saves-the-day/), but launchd's time zone was not checked on the Mac itself. Left alone, the next day's digests would have come at 04:00, 08:00 and 14:00 Dubai time, the 04:00 one inside quiet hours.
+- With a lot of mail the digest card was hard to read: three to five lines per message, long summaries, each trailed by the full mailbox address and time.
+
+**Changed**
+
+- The mail monitor now decides when a digest is due, on the `MAIL_MONITOR_TZ` clock. launchd wakes `digest --due` at the top of every hour: it sends only when a digest hour has passed that has not been sent yet, then records it in a new `meta` table; otherwise it does nothing and prints nothing. A digest hour missed during sleep is sent on wake, but not during quiet hours, when it waits for 08:00; if the push fails, the hour is not recorded and the next hour retries; right after installing, an hour that passed more than an hour ago is not caught up. `mail-monitor digest` without `--due` still sends right away.
+- The digest hours moved from `DIGEST_HOURS` in `launchd.sh` to `MAIL_MONITOR_DIGEST_HOURS` in `.env` (default `8,12,18`), and changing them needs no reinstall; `launchd.sh` says so if `DIGEST_HOURS` is still passed. `doctor` shows one more line, such as "汇总：每天 8、12、18 点（Asia/Dubai）" (digest: daily at 8, 12 and 18).
+- A new digest card: the title says how many messages there are and whether any need action, such as "邮件汇总 · 11 封，都不用处理" (mail digest · 11 messages, none need action), so the phone notification shows it; groups get a colored dot and a blank line between them; needs action and unsure get a second line with the due date, mailbox and time (mailboxes shortened to Gmail, MBZUAI and so on, just the time for today's mail); for your information shows only who and what, merges repeat mail from one address as ×N, and lists at most 12 lines before saying how many are left; long summaries lose parenthetical asides and are cut at a comma to fit two lines.
+- Shorter instructions to the model: the sender is an identity or organization only, within 10 characters and without brackets; what the mail is about within 30 characters, without repeating the sender. New mail should then take one line in the digest.
+- 144 tests. The new ones cover how digest hours are written, working out the digest hour in the configured time zone, sending each digest hour once, catching up after sleep, not sending during quiet hours, retrying at the next hour after a failed push, `digest --due` printing nothing when nothing is due, and the new card layout and shortening rules.
+
+**Upgrading**
+
+After `git pull`, run `./scripts/launchd.sh install` once to switch the digest to the new hourly job.
 
 ## 2026-10-28 · The mail monitor decides when to push
 

@@ -19,7 +19,7 @@ An agent is usually split into perception, decision, action, memory and push. Ea
 | Memory | SQLite: which mail was handled, who each sender is, what the same thread said before, your labels | `state.py`, `memory.py` |
 | Action | Read-only by default. The one write is tagging "needs action" mail, off by default; it never sends or deletes | `pipeline.py` |
 | Push | Instant messages and the digest three times a day, to the terminal, a Lark group bot, a Lark app bot, or handed to notify-hub, a local push tool. When to push (quiet hours, digest hours) is decided here | `notify.py`, `render.py`, `pipeline.py` |
-| Scheduling | launchd runs `run` every hour (and once at install and login) and `digest` at 08:00, 12:00 and 18:00 | `scripts/launchd.sh` |
+| Scheduling | launchd runs `run` every hour (and once at install and login) and wakes `digest --due` at the top of every hour, which only sends at the digest hours | `scripts/launchd.sh` |
 
 ## 2. The big picture
 
@@ -76,7 +76,7 @@ This is `pipeline.run_once`, one step at a time:
 6. **Recall and ask the model**: for each message, the metadata, memory and body (cut to 4,000 characters) go to the model, which returns JSON.
 7. **Settle** (`_settle`): update the sender's memory; tag "needs action" mail if that is switched on; decide between an instant push, the digest, or recording only (during quiet hours, mail meant for an instant push goes into the digest unless a rule marks it urgent; a failed push goes into the digest too); write the verdict back to the database.
 
-`mail-monitor digest` is a separate entry point: it sends the batched mail as one message and marks it as digested. launchd runs it at 08:00, 12:00 and 18:00; the 08:00 run also carries what quiet hours held back. If the digest cannot be pushed, nothing is marked and the mail waits for the next one.
+`mail-monitor digest` is a separate entry point: it sends the batched mail as one message and marks it as digested. launchd wakes it with `--due` at the top of every hour: it works out the latest digest hour on the `MAIL_MONITOR_TZ` clock (08:00, 12:00 and 18:00 by default), sends only if that one has not been sent yet, and then records it in the `meta` table; it does not send during quiet hours, and the 08:00 digest carries what was held back overnight. If the digest cannot be pushed, nothing is marked or recorded and the mail waits for the next hour.
 
 ## 4. How a verdict is made
 
@@ -121,13 +121,15 @@ flowchart TD
 
 ## 5. Memory
 
-The database is `~/.mail-monitor/state.db`, with three tables:
+The database is `~/.mail-monitor/state.db`, with three main tables:
 
 | Table | What it stores | Used for |
 |---|---|---|
 | `messages` | Every handled message: sender, subject, normalized subject, the verdict (who, what, needs action …), push state, your label. **No bodies** | Dedupe, digests, thread history, evaluation |
 | `senders` | Every sender: name, domain, identity and who set it, message count | "Who is this" |
 | `runs` | Every check: how many fetched, how many new, how many pushed, which errors | Troubleshooting |
+
+A `meta` table holds small bits of state; for now only which digest hour was sent last.
 
 Before each verdict, `memory.recall` pulls two things from the database:
 
@@ -201,7 +203,8 @@ A sender's identity has three sources, from highest to lowest priority: what you
 | A push fails: a direct Lark push fails, or notify-hub still cannot reach Lark after retrying on the spot | It moves into the digest and goes out with the next `digest` |
 | notify-hub itself cannot run (not installed, command not found, no answer within 60 seconds) | Same: it moves into the digest |
 | A digest cannot be pushed | Nothing is marked as digested; the mail waits and goes out with the next digest |
-| The Mac sleeps | launchd runs nothing and does not wake the Mac: missed checks are skipped and the next comes within the hour after waking; a missed digest is sent once on wake. After more than 2 days away, catch up with `run --days 7` |
+| The Mac sleeps | launchd runs nothing and does not wake the Mac: missed checks are skipped and the next comes within the hour after waking; a missed digest is sent once on wake, or at 08:00 if the Mac wakes during quiet hours. After more than 2 days away, catch up with `run --days 7` |
+| The Mac changes time zone without a restart | launchd reads the time zone only at boot and keeps waking on the old zone's hours; the top of the hour is the same moment in every whole-hour zone, and the digest hour is worked out on the `MAIL_MONITOR_TZ` clock, so nothing shifts |
 | The same message in two inboxes | Merged by id and judged once |
 
 ## 9. Safety boundaries

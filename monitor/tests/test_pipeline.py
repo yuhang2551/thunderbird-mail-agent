@@ -1,7 +1,9 @@
+import itertools
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -9,7 +11,7 @@ import pytest
 from mail_monitor.classify import LLMClassifier
 from mail_monitor.llm import LLMClient
 from mail_monitor.notify import ConsoleNotifier, NotifyError
-from mail_monitor.pipeline import init_seen, run_once, send_digest
+from mail_monitor.pipeline import init_seen, run_once, send_digest, send_digest_if_due
 from mail_monitor.rules import RuleSet
 from mail_monitor.state import State
 
@@ -270,3 +272,64 @@ async def test_a_failed_push_waits_for_the_next_digest(settings):
     notifier = ConsoleNotifier()
     assert await send_digest(settings, state=state, notifier=notifier) == 5  # 汇总也没推出去时，邮件都还攒着
     assert "DoAtlas-2" in notifier.sent[-1]
+
+
+def _dubai(day: int, hour: int, minute: int = 0) -> datetime:
+    return datetime(2026, 10, day, hour, minute, tzinfo=ZoneInfo("Asia/Dubai"))
+
+
+_ids = itertools.count()
+
+
+def _one_pending(state: State, n: int = 1) -> None:
+    from mail_monitor.models import Decision, MessageHeader
+
+    for _ in range(n):
+        state.record(MessageHeader(id=f"d{next(_ids)}", folderPath="f", author="News <n@x.y>", subject="Weekly"),
+                     Decision(who="订阅", what="周报", needs_action="no"), notify_mode="digest", pushed=False)
+
+
+async def test_digest_goes_out_once_per_slot_on_the_configured_clock(settings):
+    """launchd 每个整点叫醒一次 digest --due：钟点按 MAIL_MONITOR_TZ（迪拜）的 8、12、18 点算，每个钟点只发一次。"""
+    state, notifier = State(":memory:"), ConsoleNotifier()
+    _one_pending(state)
+
+    # 13:46 刚装上：12 点已经过去一个多小时，不补发；14 点也不是汇总钟点
+    assert await send_digest_if_due(settings, state=state, notifier=notifier, now=_dubai(28, 13, 46)) is None
+    assert await send_digest_if_due(settings, state=state, notifier=notifier, now=_dubai(28, 14)) is None
+    assert notifier.pushes == []
+
+    assert await send_digest_if_due(settings, state=state, notifier=notifier, now=_dubai(28, 18)) == 1
+    assert notifier.pushes[-1].title == "邮件汇总 · 1 封，都不用处理"
+    assert await send_digest_if_due(settings, state=state, notifier=notifier, now=_dubai(28, 19)) is None
+
+    # 第二天 8 点没有攒着的邮件：不发卡片，但记下 8 点这次已经处理过
+    assert await send_digest_if_due(settings, state=state, notifier=notifier, now=_dubai(29, 8)) == 0
+    assert len(notifier.pushes) == 1
+    assert state.get_meta("last_digest_slot") == _dubai(29, 8).isoformat()
+
+
+async def test_a_slot_missed_in_sleep_is_caught_up_but_not_during_quiet_hours(settings):
+    settings = settings.model_copy(update={"quiet_hours": "23:00-08:00"})
+    state, notifier = State(":memory:"), ConsoleNotifier()
+    state.set_meta("last_digest_slot", _dubai(28, 12).isoformat())
+    _one_pending(state)
+
+    # 18 点在睡觉，19:30 打开盖子：launchd 补叫一次，补发 18 点那次
+    assert await send_digest_if_due(settings, state=state, notifier=notifier, now=_dubai(28, 19, 30)) == 1
+
+    # 18 点之后来的邮件；夜里合盖时被短暂叫醒也不发，留到 8 点
+    _one_pending(state, 2)
+    assert await send_digest_if_due(settings, state=state, notifier=notifier, now=_dubai(29, 3)) is None
+    assert await send_digest_if_due(settings, state=state, notifier=notifier, now=_dubai(29, 8)) == 2
+
+
+async def test_a_digest_that_fails_is_retried_at_the_next_hour(settings):
+    state = State(":memory:")
+    state.set_meta("last_digest_slot", _dubai(28, 12).isoformat())
+    _one_pending(state)
+
+    with pytest.raises(NotifyError):
+        await send_digest_if_due(settings, state=state, notifier=DownNotifier(), now=_dubai(28, 18))
+    assert state.get_meta("last_digest_slot") == _dubai(28, 12).isoformat()  # 没发出去就不算这个钟点
+    assert await send_digest_if_due(settings, state=state, notifier=ConsoleNotifier(), now=_dubai(28, 19)) == 1

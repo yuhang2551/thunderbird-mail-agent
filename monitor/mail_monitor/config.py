@@ -9,7 +9,7 @@ import os
 import re
 import shlex
 import shutil
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -56,8 +56,10 @@ class Settings(BaseModel):
     claude_timeout: float = 180.0  # 一封邮件最多等几秒
 
     # 推送
+    # 每天几点发汇总（按 timezone 的钟点，整点，逗号隔开）。launchd 每个整点叫醒 digest --due 一次，到了这些钟点才真发
+    digest_hours: str = "8,12,18"
     # 免打扰时段（按 timezone 的钟点）：这段时间里只即时推送规则写了 urgency: high 的，其余的进汇总，
-    # 免打扰结束时的那次汇总（默认 8 点）一起发；写 off 关掉
+    # 免打扰结束时的那次汇总（默认 8 点）一起发；汇总本身也不在这段时间里发。写 off 关掉
     quiet_hours: str = "23:00-08:00"
     notify_backend: NotifyBackend = "console"
     notify_hub_bin: str = "notify-hub"  # notify_hub 推送调用的命令；launchd 下找不到时写完整路径
@@ -101,6 +103,20 @@ class Settings(BaseModel):
     def quiet_window(self) -> tuple[time, time] | None:
         return parse_quiet_hours(self.quiet_hours)
 
+    @property
+    def digest_hour_list(self) -> list[int]:
+        return parse_digest_hours(self.digest_hours)
+
+    def latest_digest_slot(self, now: datetime) -> datetime:
+        """now 之前（含 now）最近的那个汇总钟点。按 timezone（不填就是本机时区）算，不看 launchd 用的是哪个时区。"""
+        local = now.astimezone(ZoneInfo(self.timezone) if self.timezone else None)
+        for day in (local.date(), local.date() - timedelta(days=1)):
+            for hour in reversed(self.digest_hour_list):
+                slot = datetime.combine(day, time(hour), tzinfo=local.tzinfo)
+                if slot <= local:
+                    return slot
+        raise AssertionError("昨天最晚的那个钟点一定在 now 之前")
+
     def in_quiet_hours(self, now: datetime) -> bool:
         """now 落在免打扰时段里吗？按 timezone（不填就是本机时区）的钟点算，开始算在里面、结束不算。"""
         window = self.quiet_window
@@ -143,6 +159,24 @@ def parse_quiet_hours(value: str) -> tuple[time, time] | None:
     return start, end
 
 
+_DIGEST_HOUR = re.compile(r"(\d{1,2})(?::00)?")
+
+
+def parse_digest_hours(value: str) -> list[int]:
+    """「8,12,18」「8 12 18」「8:00、18:00」→ [8, 12, 18]。写错了抛 ValueError。"""
+    hours = set()
+    for part in re.split(r"[\s,，、]+", value.strip()):
+        if not part:
+            continue
+        match = _DIGEST_HOUR.fullmatch(part)
+        if not match or int(match.group(1)) > 23:
+            raise ValueError(f"要写成 0 到 23 的整点，逗号隔开，比如 8,12,18：{value!r}")
+        hours.add(int(match.group(1)))
+    if not hours:
+        raise ValueError("至少写一个钟点，比如 8,12,18")
+    return sorted(hours)
+
+
 def resolve_binary(binary: str) -> str:
     """PATH 里找不到命令时，退回 ~/.local/bin 下的同名命令：claude 的官方安装脚本和 uv tool 都装在那里，
     刚装完的终端窗口、launchd 里 PATH 常常还没有它。"""
@@ -180,6 +214,7 @@ ENV_MAP: dict[str, str] = {
     "MAIL_MONITOR_CLAUDE_BIN": "claude_bin",
     "MAIL_MONITOR_CLAUDE_MODEL": "claude_model",
     "MAIL_MONITOR_CLAUDE_TIMEOUT": "claude_timeout",
+    "MAIL_MONITOR_DIGEST_HOURS": "digest_hours",
     "MAIL_MONITOR_QUIET_HOURS": "quiet_hours",
     "MAIL_MONITOR_NOTIFY": "notify_backend",
     "MAIL_MONITOR_NOTIFY_HUB_BIN": "notify_hub_bin",
@@ -220,6 +255,8 @@ def _coerce(field: str, raw: str) -> Any:
         if choice not in ("api", "claude"):
             raise ValueError("只能是 api 或 claude")
         return choice
+    if field == "digest_hours":
+        return ",".join(str(hour) for hour in parse_digest_hours(value))
     if field == "quiet_hours":
         window = parse_quiet_hours(value)
         return "off" if window is None else f"{window[0]:%H:%M}-{window[1]:%H:%M}"

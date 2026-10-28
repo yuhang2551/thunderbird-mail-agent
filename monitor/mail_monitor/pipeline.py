@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .claude_cli import ClaudeCLIClient
 from .classify import Classifier, FallbackClassifier, LLMClassifier
@@ -231,16 +231,41 @@ async def _settle(
     state.record(header, decision, notify_mode=mode, pushed=pushed, to_digest=to_digest)
 
 
-async def send_digest(settings: Settings, *, notifier: Notifier | None = None, state: State | None = None) -> int:
+async def send_digest(
+    settings: Settings, *, notifier: Notifier | None = None, state: State | None = None, now: datetime | None = None
+) -> int:
     """把攒着的邮件合成一条发出去，返回这次汇总了几封。推不出去抛 NotifyError，邮件都还攒着，下次汇总再带上。"""
     state = state or State(settings.resolved_db_path)
-    notifier = notifier or build_notifier(settings)
     rows = state.pending_digest()
     if not rows:
         return 0
-    await notifier.send(digest_push(rows, timezone_name=settings.timezone))
+    notifier = notifier or build_notifier(settings)
+    await notifier.send(digest_push(rows, now=now, timezone_name=settings.timezone))
     state.mark_digested([row["id"] for row in rows])
     return len(rows)
+
+
+async def send_digest_if_due(
+    settings: Settings, *, notifier: Notifier | None = None, state: State | None = None, now: datetime | None = None
+) -> int | None:
+    """launchd 每个整点叫醒一次（digest --due）：过了一个汇总钟点、这个钟点还没发过，才汇总；没到点返回 None。
+
+    钟点按 settings.timezone 算，launchd 用哪个时区都不影响。睡眠里错过的钟点醒来补发；推不出去不记这个钟点，下个整点重试；
+    免打扰时段里不发，等免打扰结束。刚装上时不补发一个多小时以前的钟点。
+    """
+    now = now or datetime.now(timezone.utc)
+    state = state or State(settings.resolved_db_path)
+    slot = settings.latest_digest_slot(now)
+    last = state.get_meta("last_digest_slot")
+    if last is not None and slot <= datetime.fromisoformat(last):
+        return None
+    if last is None and now - slot > timedelta(minutes=70):
+        return None
+    if settings.in_quiet_hours(now):
+        return None
+    count = await send_digest(settings, notifier=notifier, state=state, now=now)
+    state.set_meta("last_digest_slot", slot.isoformat())
+    return count
 
 
 async def init_seen(settings: Settings, *, days_back: int | None = None, state: State | None = None) -> RunReport:

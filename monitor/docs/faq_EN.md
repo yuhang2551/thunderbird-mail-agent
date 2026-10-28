@@ -127,19 +127,27 @@ The mail monitor decides all the timing, whether pushes go through notify-hub or
 - Needs action or unsure: as soon as the hourly check finds them; during quiet hours (23:00 to 08:00) they go into the digest and arrive with the 08:00 one.
 - Everything else worth knowing: one "邮件汇总" (mail digest) card at 08:00, 12:00 and 18:00.
 
-To change it: quiet hours are `MAIL_MONITOR_QUIET_HOURS` in `.env`, and the digest hours are `DIGEST_HOURS` when installing the scheduled job (see below).
+To change it: both live in `.env`, quiet hours as `MAIL_MONITOR_QUIET_HOURS` and the digest hours as `MAIL_MONITOR_DIGEST_HOURS`, both on the `MAIL_MONITOR_TZ` clock.
+
+**The digest arrives at the wrong hour**
+
+First check that the hours and time zone on the "汇总" (digest) line of `mail-monitor doctor` are right; the time zone is `MAIL_MONITOR_TZ` in `.env`. Older versions had launchd run the digest at 08:00, 12:00 and 18:00 directly, and launchd reads the time zone only at boot: after the Mac changes time zone without a restart, the digest follows the old zone's clock (a Mac booted on Beijing time and then taken to Dubai sends the "18:00" digest at 14:00 Dubai time). Now launchd wakes it at the top of every hour and the mail monitor decides on the `MAIL_MONITOR_TZ` clock whether a digest is due. If your scheduled job was installed before 2026-10-28, run `./scripts/launchd.sh install` once after `git pull` to switch to the new one.
 
 **launchd is installed but nothing seems to run**
 
 - `./scripts/launchd.sh status` shows whether it is installed, the last exit code and the last lines of the logs.
-- Nothing runs while the Mac sleeps, and the Mac is not woken for it. Missed checks are skipped and the next one comes within the hour after waking; a digest that fell during sleep is sent once on wake (see [Apple's launchd documentation](https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html)).
+- Nothing runs while the Mac sleeps, and the Mac is not woken for it. Missed checks are skipped and the next one comes within the hour after waking; a digest that fell during sleep is sent once on wake, or at 08:00 if the Mac wakes during quiet hours (see [Apple's launchd documentation](https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html)).
 - If the computer was off or closed for more than 2 days, older mail is no longer judged automatically; catch up once by hand with `mail-monitor run --days 7`.
 
 **Changing the interval or the digest hours**
 
+The check interval is set when installing the scheduled job:
+
 ```bash
-RUN_INTERVAL=120 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install
+RUN_INTERVAL=120 ./scripts/launchd.sh install
 ```
+
+The digest hours go in `.env`, for example `MAIL_MONITOR_DIGEST_HOURS=8,13,20`, without reinstalling the job.
 
 ## Data and privacy
 
