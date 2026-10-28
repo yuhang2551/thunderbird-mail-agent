@@ -32,30 +32,37 @@ Prerequisites: steps 1–3 of the main README are done (Thunderbird signed in to
 
 ```bash
 cd ~/thunderbird-mail-agent/monitor
-./scripts/install.sh     # creates .venv, installs dependencies, writes ~/.mail-monitor/.env and rules.yaml (needs Python 3.10+)
+./scripts/install.sh
 source .venv/bin/activate
-# then edit ~/.mail-monitor/.env (pick a model: DEEPSEEK_API_KEY, or MAIL_MONITOR_LLM=claude for a Claude subscription; both optional; keep push on console at first) and adjust ~/.mail-monitor/rules.yaml
-
-mail-monitor doctor      # self-check: can it reach Thunderbird, which inboxes, are push and model configured. Changes nothing
-mail-monitor init        # first run: register existing mail as seen so old mail is not pushed
-mail-monitor run --dry-run   # show how it would judge, without recording or pushing (and without memory)
-mail-monitor run         # one real check
-mail-monitor digest      # send the batched mail as one digest
-mail-monitor senders     # which senders it remembers and who decided their identity
-mail-monitor sender-set prof@example.edu advisor   # tell it who someone is (highest priority)
-mail-monitor review      # go through its verdicts one by one and mark whether the mail really needed action
-mail-monitor eval        # accuracy from those labels: how many were missed, how many were noise
 ```
+
+`install.sh` creates `.venv`, installs dependencies and writes `~/.mail-monitor/.env` and `rules.yaml` (needs Python 3.10+). Then edit `~/.mail-monitor/.env`: pick a model (`DEEPSEEK_API_KEY`, or `MAIL_MONITOR_LLM=claude` for a Claude subscription; both optional) and keep push on `console` at first; adjust `~/.mail-monitor/rules.yaml` to your situation.
+
+The command blocks on this page carry no comments, so you can paste a whole block into the macOS terminal: by default zsh does not treat a trailing `#` as a comment and passes it to the command as an argument.
+
+| Command | What it does |
+|---|---|
+| `mail-monitor doctor` | Self-check: can it reach Thunderbird, which inboxes, are push and model configured. Changes nothing |
+| `mail-monitor init` | First run: register existing mail as seen so old mail is not pushed |
+| `mail-monitor run --dry-run` | Show how it would judge, without recording or pushing (and without memory) |
+| `mail-monitor run` | One real check |
+| `mail-monitor digest` | Send the batched mail as one digest |
+| `mail-monitor senders` | Which senders it remembers and who decided their identity |
+| `mail-monitor sender-set prof@example.edu advisor` | Tell it who someone is (highest priority) |
+| `mail-monitor review` | Go through its verdicts one by one and mark whether the mail really needed action |
+| `mail-monitor eval` | Accuracy from those labels: how many were missed, how many were noise |
 
 ### Running on a schedule
 
 On macOS use launchd (sturdier than a daemon: nothing runs while the Mac sleeps, one catch-up run happens on wake, and one run happens at login):
 
 ```bash
-./scripts/launchd.sh install     # run once right away, then hourly; digest at 09:00 and 18:00
-./scripts/launchd.sh status      # installed or not, last exit code, last lines of the logs
+./scripts/launchd.sh install
+./scripts/launchd.sh status
 ./scripts/launchd.sh uninstall
 ```
+
+`install` runs once right away, then hourly, with a digest at 09:00 and 18:00 every day; `status` shows whether it is installed, the last exit code and the last lines of the logs (each line starts with the time of that run); `uninstall` removes it.
 
 Interval and hours are configurable, for example a check every 30 minutes and digests at 08:00, 13:00 and 20:00: `RUN_INTERVAL=1800 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install`. Checking more often costs no extra model usage: the model only sees new mail, once per message. `./scripts/launchd.sh print` only prints what would be installed. Logs are in `~/.mail-monitor/logs/`.
 
@@ -104,9 +111,11 @@ Three routes, pick one:
 6. Create a group in Lark (just you is fine), add a bot → choose this app. Then:
 
 ```bash
-mail-monitor lark-chats                     # list the chats the bot is in, with chat_id
-mail-monitor lark-chats --email you@example.com   # also look up your open_id (for direct messages)
+mail-monitor lark-chats
+mail-monitor lark-chats --email you@example.com
 ```
+
+The first line lists the chats the bot is in, with their chat_id; the second also looks up your open_id (for direct messages).
 
 Put the result in `.env`: `MAIL_MONITOR_NOTIFY=lark_app`, `LARK_RECEIVE_ID=…`. A chat id starting with `oc_` is sent to that chat and an open_id starting with `ou_` as a direct message, so `LARK_RECEIVE_ID_TYPE` can stay empty.
 
@@ -185,8 +194,10 @@ Use it for a week or two and label a few dozen messages and you have numbers for
 ## Development
 
 ```bash
-pytest            # tests/fake_server.py stands in for thunderbird-mcp, fake_claude.py for claude and fake_notify_hub.py for notify-hub, so no Thunderbird or account is needed
+pytest
 ```
+
+`tests/fake_server.py` stands in for thunderbird-mcp, `fake_claude.py` for claude and `fake_notify_hub.py` for notify-hub, so the tests need no Thunderbird or account.
 
 | Path | Contents |
 |---|---|

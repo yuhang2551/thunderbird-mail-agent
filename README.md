@@ -106,18 +106,20 @@ Agent 先在对话里给你看回复全文，你确认后才**存进邮箱的草
 到 [nodejs.org](https://nodejs.org) 下载 **LTS 版安装包**（macOS 用 `.pkg`）。建议用安装包而不是 nvm，因为路径固定，图形界面的 Agent 也能找到它。
 
 ```bash
-node -v   # 能显示版本号就说明装好了
+node -v
 ```
+
+能显示版本号就说明装好了。
 
 ### 第 3 步：安装 thunderbird-mcp 扩展（锁定版本）
 
 ```bash
 git clone https://github.com/yuhang2551/thunderbird-mail-agent.git ~/thunderbird-mail-agent
 cd ~/thunderbird-mail-agent
-./scripts/install-thunderbird-mcp.sh      # 下载 v0.9.2 到 ~/thunderbird-mcp 并校验 SHA-256
+./scripts/install-thunderbird-mcp.sh
 ```
 
-然后在 Thunderbird 里：**工具 → 附加组件和主题 → 齿轮图标 → 从文件安装附加组件**，选择 `~/thunderbird-mcp/dist/thunderbird-mcp.xpi`，装好后重启一次 Thunderbird。
+脚本把 v0.9.2 下载到 `~/thunderbird-mcp` 并校验 SHA-256。然后在 Thunderbird 里：**工具 → 附加组件和主题 → 齿轮图标 → 从文件安装附加组件**，选择 `~/thunderbird-mcp/dist/thunderbird-mcp.xpi`，装好后重启一次 Thunderbird。
 
 > 安装时会提示它"拥有对 Thunderbird 和电脑的完全访问权限"。这是因为扩展用了 Thunderbird 的 Experiment API 来开本地服务，具体说明和我们对代码的检查结果见 [docs/security.md](docs/security.md)。
 
@@ -145,10 +147,10 @@ Agent 拿到工具以后，还需要知道**怎么**处理邮件：每封都读�
 - **Claude Code / Codex / 手机端**：运行下面的命令，生成一个专用的工作文件夹。里面有 `CLAUDE.md` / `AGENTS.md`（规则）、`.mcp.json`（连接方式）、`.claude/settings.json`（只读工具免确认）和 `upcoming-events.md`（活动清单）。
 
 ```bash
-./scripts/create-mail-workspace.sh        # 默认生成 ~/mail-workspace
+./scripts/create-mail-workspace.sh
 ```
 
-打开 `~/mail-workspace/CLAUDE.md`，在"我的邮箱"一节填上你的邮箱和偏好，比如回复用什么语言、署名写什么。
+默认生成在 `~/mail-workspace`；想放在别处，就把文件夹路径写在命令后面。打开 `~/mail-workspace/CLAUDE.md`，在"我的邮箱"一节填上你的邮箱和偏好，比如回复用什么语言、署名写什么。
 
 ### 第 6 步：试一下
 
