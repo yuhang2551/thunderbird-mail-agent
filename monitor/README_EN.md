@@ -2,17 +2,17 @@
 
 [中文](README.md) | **English**
 
-The rest of this repository waits for you to ask ("what came in this week?") before the agent reads anything. This directory turns it into **hands-off monitoring**: every few minutes it checks every inbox, and for each new message it decides who it is from, what it wants, whether you need to act and by when, then pushes the result to Feishu / Lark.
+The rest of this repository waits for you to ask ("what came in this week?") before the agent reads anything. This directory turns it into **hands-off monitoring**: on a schedule (hourly by default) it checks every inbox, and for each new message it decides who it is from, what it wants, whether you need to act and by when, then pushes the result to Feishu / Lark.
 
 ```
-launchd every 5 min ──► mail-monitor run
-                          │ 1 call thunderbird-mcp over MCP: listFolders → getRecentMessages
-                          │ 2 dedupe (SQLite remembers every message already handled)
-                          │ 3 rules (rules.yaml: never push verification codes, digest newsletters, advisor is always urgent …)
-                          │ 4 anything the rules did not settle: read the body + recall memory (who this sender is, what the same thread said before) → LLM verdict (JSON with a fixed schema)
-                          │ 5 optional: tag "needs action" mail in Thunderbird (off by default)
-                          │ 6 push: needs action / unsure → right away; the rest → morning and evening digest (mail-monitor digest)
-                          └ 7 record: the verdict and the sender's identity go back into SQLite as memory for next time
+launchd every hour ──► mail-monitor run
+                         │ 1 call thunderbird-mcp over MCP: listFolders → getRecentMessages
+                         │ 2 dedupe (SQLite remembers every message already handled)
+                         │ 3 rules (rules.yaml: never push verification codes, digest newsletters, advisor is always urgent …)
+                         │ 4 anything the rules did not settle: read the body + recall memory (who this sender is, what the same thread said before) → LLM verdict (JSON with a fixed schema)
+                         │ 5 optional: tag "needs action" mail in Thunderbird (off by default)
+                         │ 6 push: needs action / unsure → right away; the rest → morning and evening digest (mail-monitor digest)
+                         └ 7 record: the verdict and the sender's identity go back into SQLite as memory for next time
 ```
 
 It **only reads mail; it never sends or deletes**. The one action that writes to the mailbox (tagging) is off by default.
@@ -49,20 +49,22 @@ mail-monitor eval        # accuracy from those labels: how many were missed, how
 
 ### Running on a schedule
 
-On macOS use launchd (sturdier than a daemon: nothing runs while the Mac sleeps, and one catch-up run happens on wake):
+On macOS use launchd (sturdier than a daemon: nothing runs while the Mac sleeps, one catch-up run happens on wake, and one run happens at login):
 
 ```bash
-./scripts/launchd.sh install     # run every 5 minutes, digest at 09:00 and 18:00
+./scripts/launchd.sh install     # run once right away, then hourly; digest at 09:00 and 18:00
 ./scripts/launchd.sh status      # installed or not, last exit code, last lines of the logs
 ./scripts/launchd.sh uninstall
 ```
 
-Interval and hours are configurable: `RUN_INTERVAL=120 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install`. Logs are in `~/.mail-monitor/logs/`. Run `mail-monitor init` once before installing, or the first run pushes all existing mail.
+Interval and hours are configurable, for example a check every 30 minutes and digests at 08:00, 13:00 and 20:00: `RUN_INTERVAL=1800 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install`. Checking more often costs no extra model usage: the model only sees new mail, once per message. `./scripts/launchd.sh print` only prints what would be installed. Logs are in `~/.mail-monitor/logs/`.
+
+Run `mail-monitor init` once before installing, or the first check pushes all mail from the last two days; `install` stops and reminds you if it has not been run.
 
 On Linux use cron:
 
 ```
-*/5 * * * *  ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor run    >> ~/.mail-monitor/logs/run.log 2>&1
+0 * * * *    ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor run    >> ~/.mail-monitor/logs/run.log 2>&1
 0 9,18 * * * ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor digest >> ~/.mail-monitor/logs/digest.log 2>&1
 ```
 

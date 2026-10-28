@@ -1,4 +1,7 @@
+import os
+import plistlib
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -19,3 +22,59 @@ def test_variables_before_chinese_text_use_braces(script: Path):
         if BARE_VARIABLE_BEFORE_NON_ASCII.search(line)
     ]
     assert not bad, "\n".join(bad)
+
+
+LAUNCHD = REPO / "monitor" / "scripts" / "launchd.sh"
+
+
+def launchd(tmp_path: Path, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
+    base = {"PATH": os.environ["PATH"], "HOME": str(tmp_path), "MAIL_MONITOR_BIN": "/opt/mm/mail-monitor"}
+    return subprocess.run(["bash", str(LAUNCHD), *args], capture_output=True, text=True, env={**base, **env}, check=False)
+
+
+def printed_plists(tmp_path: Path, **env: str) -> list[dict]:
+    """launchd.sh print 打出来的两个 plist（run、digest）。"""
+    result = launchd(tmp_path, "print", **env)
+    assert result.returncode == 0, result.stderr
+    return [plistlib.loads(("<?xml" + part).encode()) for part in result.stdout.split("<?xml")[1:]]
+
+
+def test_launchd_checks_hourly_and_once_at_load(tmp_path: Path):
+    run, digest = printed_plists(tmp_path)
+    assert run["ProgramArguments"] == ["/opt/mm/mail-monitor", "run"]
+    assert run["StartInterval"] == 3600
+    assert run["RunAtLoad"] is True  # 装上、开机登录时先巡检一次，不用等一小时
+    assert digest["RunAtLoad"] is False  # 汇总只在定好的时间发
+    assert [(e["Hour"], e["Minute"]) for e in digest["StartCalendarInterval"]] == [(9, 0), (18, 0)]
+    # claude 和 notify-hub 的官方装法都在 ~/.local/bin，launchd 默认的 PATH 里没有
+    assert f"{tmp_path}/.local/bin" in run["EnvironmentVariables"]["PATH"].split(":")
+
+
+def test_launchd_interval_and_digest_hours_can_be_changed(tmp_path: Path):
+    run, digest = printed_plists(tmp_path, RUN_INTERVAL="1800", DIGEST_HOURS="8 13 20")
+    assert run["StartInterval"] == 1800
+    assert [e["Hour"] for e in digest["StartCalendarInterval"]] == [8, 13, 20]
+
+
+def test_launchd_rejects_an_interval_that_is_not_seconds(tmp_path: Path):
+    result = launchd(tmp_path, "print", RUN_INTERVAL="1h")
+    assert result.returncode == 1
+    assert "RUN_INTERVAL" in result.stderr
+
+
+def test_launchd_install_refuses_before_init(tmp_path: Path):
+    """装上就会先巡检一次：没 init 的话会把最近两天的邮件全推一遍，所以先拦下来。"""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "uname").write_text("#!/bin/sh\necho Darwin\n")
+    (fake_bin / "uname").chmod(0o755)
+    mail_monitor = fake_bin / "mail-monitor"
+    mail_monitor.write_text("#!/bin/sh\n")
+    mail_monitor.chmod(0o755)
+    (tmp_path / ".mail-monitor").mkdir()
+    (tmp_path / ".mail-monitor" / ".env").write_text("MAIL_MONITOR_NOTIFY=console\n")
+
+    result = launchd(tmp_path, "install", PATH=f"{fake_bin}:{os.environ['PATH']}", MAIL_MONITOR_BIN=str(mail_monitor))
+    assert result.returncode == 1
+    assert "mail-monitor init" in result.stderr
+    assert not (tmp_path / "Library").exists()  # 什么都没装

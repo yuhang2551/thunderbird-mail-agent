@@ -46,7 +46,7 @@ Usually `MAIL_MONITOR_ACCOUNTS` is wrong. It matches part of an account id or na
 
 **The first run pushed a pile of old mail**
 
-After installing, run `mail-monitor init` once to register existing mail as seen.
+After installing, run `mail-monitor init` once to register existing mail as seen. `./scripts/launchd.sh install` now stops and reminds you if it has not been run.
 
 **Nothing arrives on my phone**
 

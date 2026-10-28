@@ -6,10 +6,24 @@ Recorded increment by increment: what each step added, how far it was verified o
 
 ## Next
 
-1. On the Mac, `git pull`, switch push in `.env` to `notify_hub`, and get `mail-monitor notify-test` onto the phone.
-2. Mark existing mail as seen with `mail-monitor init`, install the launchd jobs, and let it run for real. How often to check is decided then (the script currently defaults to every 5 minutes).
-3. Use it for a week: label with `review`, check the miss and noise rates with `eval`, and tune the rules and prompt from the results.
-4. The ChatGPT subscription version (designed in [Model backends](docs/model-backends_EN.md), not urgent).
+1. On the Mac: `git pull`, switch push in `.env` to `notify_hub`, mark existing mail as seen with `mail-monitor init`, install the schedule with `./scripts/launchd.sh install`, and let it run for real.
+2. Use it for a week: label with `review`, check the miss and noise rates with `eval`, and tune the rules and prompt from the results. Along the way, replace the example address in the advisor rule of `rules.yaml` and set `MAIL_MONITOR_PROFILE`.
+3. The ChatGPT subscription version (designed in [Model backends](docs/model-backends_EN.md), not urgent).
+
+## 2026-10-28 · The schedule checks hourly
+
+**Changed**
+
+- `scripts/launchd.sh` now checks every hour by default instead of every 5 minutes. Job-search and university mail can usually wait an hour, so the background job need not run often; checking more often would not cost extra model usage either, since the model only sees new mail. `RUN_INTERVAL` still changes it.
+- One check runs at install and at login, so there is no hour-long wait.
+- `install` stops with a reminder if `mail-monitor init` has not been run: the first check starts right away, and without init it would push all mail from the last two days.
+- launchd's PATH now includes `~/.local/bin`, where claude and notify-hub are installed.
+- New `./scripts/launchd.sh print`: prints the plists without installing them; the tests use it to check what is generated.
+
+**Found and fixed while testing**
+
+- Through notify-hub, `notify-test` printed its result twice (once as a log line, once as the result). It now prints once; to see notify-hub's answers during a check, add `-v`.
+- 103 tests.
 
 ## 2026-10-27 · Pushes can go through notify-hub
 
@@ -26,7 +40,7 @@ Recorded increment by increment: what each step added, how far it was verified o
 **How far it was verified**
 
 - In the cloud, one full check ran against the real notify-hub (pushing to the terminal, not to Lark): the advisor's mail went out as urgent, and the rest was held by notify-hub during quiet hours.
-- Not yet tried on the Mac with real Lark; that is step 1 of Next.
+- Tested on the Mac on 2026-10-28: after `git pull`, `doctor` with `MAIL_MONITOR_NOTIFY=notify_hub` showed notify-hub 0.2.1 on the push line, with both inboxes and the Claude subscription fine too; `notify-test` went out through notify-hub and Lark accepted it (message #7 in notify-hub).
 
 ## 2026-10-27 · Lark push working
 
