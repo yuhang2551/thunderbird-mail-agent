@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# 把 mail-monitor 装成 macOS 的定时任务（launchd）：每小时 run 一次，每天 8、12、18 点各 digest 一次（8 点那次带上夜里免打扰时段留下的）。
+# 把 mail-monitor 装成 macOS 的定时任务（launchd）：每小时 run 一次；每个整点叫醒 digest --due 一次，
+# 到了 .env 里 MAIL_MONITOR_DIGEST_HOURS 的钟点（默认 8、12、18 点，按 MAIL_MONITOR_TZ 算）才真发汇总。
+# 几点发由 mail-monitor 自己判断，因为 launchd 只在开机时读一次时区：换了时区没重启，它还按旧时区的钟点跑。
 # 用法：./scripts/launchd.sh install | uninstall | status | print（只打印要装的 plist，不安装）
 # 可选环境变量：MAIL_MONITOR_BIN（默认 monitor/.venv/bin/mail-monitor）、RUN_INTERVAL（秒，默认 3600）、
-#              DIGEST_HOURS（默认 "8 12 18"）、MAIL_MONITOR_HOME（默认 ~/.mail-monitor）
+#              MAIL_MONITOR_HOME（默认 ~/.mail-monitor）
 # 电脑睡眠时任务不跑，launchd 也不会为它叫醒电脑。run 按间隔跑，睡眠中错过的直接跳过，醒来后到下一个间隔照常跑；
-# digest 按钟点跑，赶上睡眠的醒来补跑一次。装上和开机登录时 run 先跑一次；每次巡检回看两天，所以睡眠期间的邮件不会漏。
+# digest 按整点跑，赶上睡眠的醒来补跑一次，错过的汇总这时补发。装上和开机登录时 run 先跑一次；每次巡检回看两天，所以睡眠期间的邮件不会漏。
 set -euo pipefail
 
 MONITOR_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -14,7 +16,6 @@ LOG_DIR="$HOME_DIR/logs"
 AGENTS="$HOME/Library/LaunchAgents"
 PREFIX="com.thunderbird-mail-agent.mail-monitor"
 RUN_INTERVAL="${RUN_INTERVAL:-3600}"
-DIGEST_HOURS="${DIGEST_HOURS:-8 12 18}"
 NODE_DIR="$(dirname "$(command -v node 2>/dev/null || echo /usr/local/bin/node)")"
 # Claude 订阅版（MAIL_MONITOR_LLM=claude）要调用 claude；官方安装器默认装在 ~/.local/bin
 CLAUDE_DIR="$(dirname "$(command -v claude 2>/dev/null || echo "$HOME/.local/bin/claude")")"
@@ -25,6 +26,9 @@ need_macos() { [ "$(uname)" = "Darwin" ] || die "launchd 只有 macOS 有。Linu
 case "$RUN_INTERVAL" in
   ''|*[!0-9]*|0) die "RUN_INTERVAL 要写成秒数，比如 3600（每小时）、1800（每 30 分钟）" ;;
 esac
+if [ -n "${DIGEST_HOURS:-}" ]; then
+  echo "⚠️  DIGEST_HOURS 不再用了：汇总时间写在 $HOME_DIR/.env 里，比如 MAIL_MONITOR_DIGEST_HOURS=${DIGEST_HOURS}" >&2
+fi
 
 every() {  # 3600 → 每小时，7200 → 每 2 小时，1800 → 每 30 分钟，90 → 每 90 秒
   if [ "$1" -eq 3600 ]; then
@@ -52,7 +56,7 @@ env_xml() {
 XML
 }
 
-plist_head() {  # $1 = Label，$2 = 子命令，$3 = 装上和开机登录时先跑一次（true / false）
+plist_head() {  # $1 = Label，$2 = 子命令，$3 = 装上和开机登录时先跑一次（true / false），$4 = 子命令的选项（可不填）
   cat <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -60,7 +64,7 @@ plist_head() {  # $1 = Label，$2 = 子命令，$3 = 装上和开机登录时先
 <dict>
   <key>Label</key><string>$1</string>
   <key>ProgramArguments</key>
-  <array><string>$BIN</string><string>$2</string></array>
+  <array><string>$BIN</string><string>$2</string>${4:+<string>$4</string>}</array>
   <key>StandardOutPath</key><string>$LOG_DIR/$2.log</string>
   <key>StandardErrorPath</key><string>$LOG_DIR/$2.log</string>
   <key>ProcessType</key><string>Background</string>
@@ -80,15 +84,14 @@ XML
 }
 
 digest_plist() {
-  plist_head "$PREFIX.digest" digest false
-  echo "  <key>StartCalendarInterval</key>"
-  echo "  <array>"
-  for hour in $DIGEST_HOURS; do
-    echo "    <dict><key>Hour</key><integer>$hour</integer><key>Minute</key><integer>0</integer></dict>"
-  done
-  echo "  </array>"
-  echo "</dict>"
-  echo "</plist>"
+  # 只写 Minute 不写 Hour：每个整点都叫醒一次，几点真发由 digest --due 按 MAIL_MONITOR_TZ 判断
+  plist_head "$PREFIX.digest" digest false --due
+  cat <<XML
+  <key>StartCalendarInterval</key>
+  <dict><key>Minute</key><integer>0</integer></dict>
+</dict>
+</plist>
+XML
 }
 
 unload() {  # 没装过也不报错
@@ -119,7 +122,8 @@ install() {
     unload "$label"
     load "$label"
   done
-  echo "✅ 已安装：$(every "$RUN_INTERVAL")巡检一次，刚装上先跑一次（${PREFIX}.run）；每天 $(echo "$DIGEST_HOURS" | sed 's/ /、/g') 点汇总（${PREFIX}.digest）"
+  echo "✅ 已安装：$(every "$RUN_INTERVAL")巡检一次，刚装上先跑一次（${PREFIX}.run）；每个整点看一次到没到汇总时间（${PREFIX}.digest）"
+  echo "   几点汇总看 mail-monitor doctor 的「汇总」那行，改的话在 .env 里写 MAIL_MONITOR_DIGEST_HOURS"
   echo "   日志：$LOG_DIR/run.log 和 digest.log；过一会儿用 ./scripts/launchd.sh status 看结果"
 }
 

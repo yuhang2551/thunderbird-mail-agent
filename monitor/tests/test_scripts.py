@@ -68,16 +68,20 @@ def test_launchd_checks_hourly_and_once_at_load(tmp_path: Path):
     assert run["StartInterval"] == 3600
     assert run["RunAtLoad"] is True  # 装上、开机登录时先巡检一次，不用等一小时
     assert digest["RunAtLoad"] is False  # 汇总只在定好的时间发
-    # 早中晚三次；免打扰时段（默认 23:00-08:00）留下的，跟 8 点那次一起到
-    assert [(e["Hour"], e["Minute"]) for e in digest["StartCalendarInterval"]] == [(8, 0), (12, 0), (18, 0)]
+    # 每个整点叫醒一次，几点真发由 digest --due 按 MAIL_MONITOR_TZ 判断：launchd 只在开机时读时区，靠不住
+    assert digest["ProgramArguments"] == ["/opt/mm/mail-monitor", "digest", "--due"]
+    assert digest["StartCalendarInterval"] == {"Minute": 0}
     # claude 和 notify-hub 的官方装法都在 ~/.local/bin，launchd 默认的 PATH 里没有
     assert f"{tmp_path}/.local/bin" in run["EnvironmentVariables"]["PATH"].split(":")
 
 
-def test_launchd_interval_and_digest_hours_can_be_changed(tmp_path: Path):
-    run, digest = printed_plists(tmp_path, RUN_INTERVAL="1800", DIGEST_HOURS="8 13 20")
+def test_launchd_interval_can_be_changed_and_digest_hours_moved_to_env(tmp_path: Path):
+    run, _ = printed_plists(tmp_path, RUN_INTERVAL="1800")
     assert run["StartInterval"] == 1800
-    assert [e["Hour"] for e in digest["StartCalendarInterval"]] == [8, 13, 20]
+    # 旧的 DIGEST_HOURS 不再管用，提示改写进 .env
+    result = launchd(tmp_path, "print", DIGEST_HOURS="8 13 20")
+    assert result.returncode == 0
+    assert "MAIL_MONITOR_DIGEST_HOURS=8 13 20" in result.stderr
 
 
 def test_launchd_rejects_an_interval_that_is_not_seconds(tmp_path: Path):

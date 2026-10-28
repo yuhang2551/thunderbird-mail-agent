@@ -120,6 +120,8 @@ def doctor() -> None:
     except NotifyError as exc:
         ok = False
         typer.echo(f"❌ 推送：{exc}")
+    hours = "、".join(str(hour) for hour in settings.digest_hour_list)
+    typer.echo(f"✅ 汇总：每天 {hours} 点（{settings.timezone or '本机时区'}）")
     if settings.quiet_window:
         typer.echo(f"✅ 免打扰：{settings.quiet_hours}，这段时间只即时推送规则写了 urgency: high 的，其余的进汇总")
     else:
@@ -164,13 +166,20 @@ def run(
 
 
 @app.command()
-def digest() -> None:
-    """把攒着的邮件合成一条汇总推送出去。配合 launchd 每天 8、12、18 点各跑一次。"""
-    from .pipeline import send_digest
+def digest(
+    due: bool = typer.Option(False, "--due", help="到了汇总钟点（MAIL_MONITOR_DIGEST_HOURS）才发；launchd 每个整点这样叫醒一次"),
+) -> None:
+    """把攒着的邮件合成一条汇总推送出去。不加 --due 就马上发。"""
+    from .pipeline import send_digest, send_digest_if_due
 
     settings = _settings()
     try:
-        count = asyncio.run(send_digest(settings))
+        if due:
+            count = asyncio.run(send_digest_if_due(settings))
+            if count is None:
+                return  # 没到点：什么都不打印，日志里只留真正汇总的那几行
+        else:
+            count = asyncio.run(send_digest(settings))
     except NotifyError as exc:
         typer.echo(f"{_stamp(settings)} ❌ 汇总没推出去，邮件都还攒着，下次汇总再带上：{exc}")
         raise typer.Exit(code=1)

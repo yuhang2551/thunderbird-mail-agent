@@ -87,12 +87,16 @@ def test_doctor_shows_quiet_hours_and_spots_an_old_notify_hub(tmp_path, monkeypa
     result = runner.invoke(app, ["doctor"])
     assert "notify_hub（notify-hub 0.2.1" in result.output and "还是 0.2 版" in result.output, result.output
     assert "免打扰：23:00-08:00" in result.output
+    assert "汇总：每天 8、12、18 点（本机时区）" in result.output
 
     monkeypatch.setenv("FAKE_NOTIFY_HUB_VERSION", "0.3.0")
     env.write_text(lines + "MAIL_MONITOR_QUIET_HOURS=off\n", encoding="utf-8")
     result = runner.invoke(app, ["doctor"])
     assert "notify-hub 0.3.0" in result.output and "还是 0.2 版" not in result.output
     assert "免打扰：关" in result.output
+
+    env.write_text(lines + "MAIL_MONITOR_TZ=Asia/Dubai\nMAIL_MONITOR_DIGEST_HOURS=9,21\n", encoding="utf-8")
+    assert "汇总：每天 9、21 点（Asia/Dubai）" in runner.invoke(app, ["doctor"]).output
 
 
 def test_a_digest_that_cannot_be_pushed_keeps_the_mail(tmp_path, monkeypatch, fake_notify_hub):
@@ -118,6 +122,37 @@ def test_a_digest_that_cannot_be_pushed_keeps_the_mail(tmp_path, monkeypatch, fa
     monkeypatch.setenv("FAKE_NOTIFY_HUB_MODE", "ok")
     result = runner.invoke(app, ["digest"])
     assert result.exit_code == 0 and "已汇总 1 封" in result.output, result.output
+
+
+def test_digest_due_prints_nothing_until_a_slot_is_due(tmp_path, monkeypatch, fake_notify_hub):
+    """launchd 每个整点叫醒一次 digest --due：没到点什么都不打印，日志里只留真正汇总的那几行。"""
+    from mail_monitor.models import Decision, MessageHeader
+    from mail_monitor.state import State
+
+    env = tmp_path / ".env"
+    env.write_text(
+        f"MAIL_MONITOR_HOME={tmp_path}\nMAIL_MONITOR_NOTIFY=notify_hub\nMAIL_MONITOR_NOTIFY_HUB_BIN={fake_notify_hub[0]}\n"
+        "MAIL_MONITOR_TZ=Asia/Dubai\nMAIL_MONITOR_QUIET_HOURS=off\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAIL_MONITOR_ENV", str(env))
+    monkeypatch.setenv("FAKE_NOTIFY_HUB_MODE", "ok")
+    state = State(tmp_path / "state.db")
+    state.record(MessageHeader(id="d1", folderPath="f", author="News <n@x.y>", subject="Weekly"),
+                 Decision(needs_action="no", decided_by="rule", rule_name="订阅"), notify_mode="digest", pushed=False)
+    state.set_meta("last_digest_slot", "2999-01-01T08:00:00+04:00")  # 最近的钟点已经发过
+    state.close()
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["digest", "--due"])
+    assert result.exit_code == 0 and result.output == "", result.output
+
+    state = State(tmp_path / "state.db")
+    state.set_meta("last_digest_slot", "2000-01-01T08:00:00+04:00")  # 之后的钟点都还没发
+    state.close()
+    result = runner.invoke(app, ["digest", "--due"])
+    assert result.exit_code == 0 and "已汇总 1 封" in result.output, result.output
+    assert runner.invoke(app, ["digest", "--due"]).output == ""  # 这个钟点发过了
 
 
 def test_run_and_digest_lines_start_with_the_time(tmp_path, monkeypatch):

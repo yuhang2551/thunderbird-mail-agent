@@ -62,19 +62,21 @@ On macOS use launchd (sturdier than a daemon: every run is a fresh process, so i
 ./scripts/launchd.sh uninstall
 ```
 
-`install` runs once right away, then hourly, with a digest at 08:00, 12:00 and 18:00 every day; the 08:00 one also carries what quiet hours held back overnight. `status` shows whether it is installed, the last exit code and the last lines of the logs (each line starts with the time of that run); `uninstall` removes it.
+`install` runs once right away, then hourly; a digest goes out at 08:00, 12:00 and 18:00 every day, and the 08:00 one also carries what quiet hours held back overnight. `status` shows whether it is installed, the last exit code and the last lines of the logs (each line starts with the time of that run); `uninstall` removes it.
 
-Nothing runs while the Mac sleeps, and the Mac is not woken for it: missed checks are skipped and the next one comes within the hour after waking (each check looks back two days, so no mail is missed); a digest that fell during sleep is sent once on wake.
+The mail monitor decides when a digest is due, on the `MAIL_MONITOR_TZ` clock: launchd wakes `mail-monitor digest --due` at the top of every hour, and it only sends when a digest hour has passed that has not been sent yet; otherwise it exits at once, without reading mail or going online. launchd is not simply told to run at 08:00, 12:00 and 18:00 because it reads the time zone only at boot: after the Mac changes time zone without a restart, it keeps firing on the old zone's clock.
 
-Interval and hours are configurable, for example a check every 30 minutes and digests at 08:00, 13:00 and 20:00: `RUN_INTERVAL=1800 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install`. Checking more often costs no extra model usage: the model only sees new mail, once per message. `./scripts/launchd.sh print` only prints what would be installed. Logs are in `~/.mail-monitor/logs/`. If you change the digest hours, keep one at the hour quiet hours end (08:00 by default), so mail held overnight does not wait until noon.
+Nothing runs while the Mac sleeps, and the Mac is not woken for it: missed checks are skipped and the next one comes within the hour after waking (each check looks back two days, so no mail is missed); a digest that fell during sleep is sent once on wake, or at 08:00 if the Mac wakes during quiet hours.
+
+The check interval is configurable, for example every 30 minutes: `RUN_INTERVAL=1800 ./scripts/launchd.sh install`. Checking more often costs no extra model usage: the model only sees new mail, once per message. Digest hours are set in `.env`, for example `MAIL_MONITOR_DIGEST_HOURS=8,13,20`, without reinstalling the job; keep one at the hour quiet hours end (08:00 by default), so mail held overnight does not wait until noon. `./scripts/launchd.sh print` only prints what would be installed. Logs are in `~/.mail-monitor/logs/`.
 
 Run `mail-monitor init` once before installing, or the first check pushes all mail from the last two days; `install` stops and reminds you if it has not been run.
 
 On Linux use cron:
 
 ```
-0 * * * *       ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor run    >> ~/.mail-monitor/logs/run.log 2>&1
-0 8,12,18 * * * ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor digest >> ~/.mail-monitor/logs/digest.log 2>&1
+0 * * * * ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor run          >> ~/.mail-monitor/logs/run.log 2>&1
+0 * * * * ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor digest --due >> ~/.mail-monitor/logs/digest.log 2>&1
 ```
 
 ## Configuration
@@ -84,6 +86,7 @@ On Linux use cron:
 | Model | `MAIL_MONITOR_LLM`, `DEEPSEEK_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, `LLM_EXTRA_BODY`, `MAIL_MONITOR_CLAUDE_MODEL` | `api` (default) calls any OpenAI-compatible endpoint; by default DeepSeek's `deepseek-flash`, with its default thinking mode turned off. `claude` runs the Claude Code already signed in on your Mac and uses your Claude Pro / Max subscription, no key needed; the model defaults to `sonnet`. Works with neither: mail the rules do not settle is pushed as "unsure". See [Model backends](docs/model-backends_EN.md) |
 | Profile | `MAIL_MONITOR_PROFILE` | One sentence about you (what you study, what job you are looking for, who your advisor is), added to the prompt. Without it the model only knows "a graduate student who is also job hunting" |
 | Push | `MAIL_MONITOR_NOTIFY` = `console` / `notify_hub` / `lark_app` / `lark_webhook` | Start with `console` to watch it in the terminal. If you have [notify-hub](https://github.com/yuhang2551/notify-hub) installed, use `notify_hub`: the Lark settings live there, so nothing to fill in here (set `MAIL_MONITOR_NOTIFY_HUB_BIN` to the full path if the command is not found). Pushing directly, an app bot needs `LARK_APP_ID`, `LARK_APP_SECRET`, `LARK_RECEIVE_ID`; a group custom bot only needs `LARK_WEBHOOK_URL` (optional `LARK_WEBHOOK_SECRET`) |
+| Digest | `MAIL_MONITOR_DIGEST_HOURS` (default `8,12,18`) | Hours of the day to send the digest, on the hour, comma-separated. They follow the `MAIL_MONITOR_TZ` clock; no need to reinstall the scheduled job after changing them |
 | Quiet hours | `MAIL_MONITOR_QUIET_HOURS` (default `23:00-08:00`) | During these hours only mail a rule marks `urgency: high` is pushed right away; the rest goes into the digest and arrives with the 08:00 one. `off` turns them off. Clock times follow `MAIL_MONITOR_TZ`; see [When pushes arrive](#when-pushes-arrive) below |
 | Rules | `MAIL_MONITOR_RULES` (default `~/.mail-monitor/rules.yaml`) | See [rules.example.yaml](rules.example.yaml) |
 | Accounts | `MAIL_MONITOR_ACCOUNTS` | Watch only some accounts; default is every inbox |
@@ -102,7 +105,7 @@ Whatever route the pushes take, the mail monitor decides the timing itself:
 | Worth knowing, newsletters | Into the digest, sent at 08:00, 12:00 and 18:00 | Same |
 | Verification codes and the like | Never pushed | Never pushed |
 
-Change quiet hours with `MAIL_MONITOR_QUIET_HOURS` (`off` turns them off) and the digest hours with `DIGEST_HOURS` (see Running on a schedule above). The model's "urgent" only shows on the card and never wakes you at night: an email's wording can sway the model, so only rules you wrote decide what gets through at night. A push that fails goes into the digest and arrives with the next one.
+Change quiet hours with `MAIL_MONITOR_QUIET_HOURS` (`off` turns them off) and the digest hours with `MAIL_MONITOR_DIGEST_HOURS`. Both follow the `MAIL_MONITOR_TZ` clock, whatever time zone the Mac's settings say. The model's "urgent" only shows on the card and never wakes you at night: an email's wording can sway the model, so only rules you wrote decide what gets through at night. A push that fails goes into the digest and arrives with the next one.
 
 ### Pushing to Feishu / Lark
 
@@ -111,7 +114,7 @@ Three routes, pick one:
 **A. Hand it to notify-hub (recommended)**: [notify-hub](https://github.com/yuhang2551/notify-hub) is a local push tool shared by several projects. The Lark credentials are set up there once; the mail monitor hands each message over and notify-hub sends it as a card right away. Install it following its README until `notify-hub test` reaches your phone, then put `MAIL_MONITOR_NOTIFY=notify_hub` in `.env`; when `mail-monitor doctor` shows the notify-hub version, it is connected. Then:
 
 - Each instant push is a card titled "who: what", so the phone notification tells you at a glance. Mail a rule marks `urgency: high` gets a red card, everything else a blue one.
-- The digest is one "邮件汇总 · N 封" (mail digest · N messages) card.
+- The digest is one card whose title says how many messages there are and whether any need action, such as "邮件汇总 · 12 封，1 封要处理" (mail digest · 12 messages, 1 needs action); the body is grouped into needs action, unsure and for your information, see [What a push looks like](#what-a-push-looks-like) below.
 - When notify-hub cannot reach Lark it retries a couple of times on the spot, then tells the mail monitor, which moves that mail into the digest to arrive with the next one; if a digest cannot be pushed, its mail stays queued as well. The same happens when notify-hub itself cannot run (not installed, command not found).
 
 **B. Group custom bot (simplest, but some tenants do not offer it)**: in desktop Lark open a group → Settings → Bots → Add bot → Custom bot → copy the webhook. In `.env`: `MAIL_MONITOR_NOTIFY=lark_webhook`, `LARK_WEBHOOK_URL=…`, optionally `LARK_WEBHOOK_SECRET=…` (signature check).
@@ -163,17 +166,20 @@ Through notify-hub it is a card with the same content, with "who: what" moved in
 Digest (08:00, 12:00 and 18:00):
 
 ```
-📮 邮件汇总 10-13 18:00 · 共 12 封          ← digest · 12 messages
+📮 邮件汇总 10-13 18:00 · 12 封，1 封要处理      ← digest · 12 messages, 1 needs action
 
-需要处理（1）                              ← needs action (1)
-• 导师：要周五前交更新后的数字（期限 2026-10-17） [School 10-13 14:02]
+🔴 需要处理（1）                                ← needs action (1)
+• 导师：要周五前交更新后的数字                    ← advisor: send the updated numbers by Friday
+　期限 10-17 · School 14:02                      ← due 10-17 · account and time received
 
-知道就行（3）                              ← for your information (3)
-• 学校活动办公室：周四 4 点讲座，周三中午前报名 [School 10-12 19:10]
-…
+⚪ 知道就行（3）                                ← for your information (3)
+• 学校活动办公室：周四 4 点讲座，周三中午前报名
+• 某银行 ×2：信用卡有一笔消费                     ← two from the same address, merged
 
-已忽略：订阅/通知 8                        ← ignored: 8 newsletters / notifications
+🔕 已忽略：订阅/通知 8                          ← ignored: 8 newsletters / notifications
 ```
+
+It is meant to be read in one screen on a phone, so each message takes at most two lines: needs action and unsure get a second line with the due date, account and time (just the time for today's mail); for your information shows only who and what, merges repeat mail from one address, and lists at most 12 lines before saying how many are left; long summaries lose their parenthetical asides and are cut at a comma. Through notify-hub the first line becomes the card title "邮件汇总 · 12 封，1 封要处理".
 
 ## How a verdict is made
 

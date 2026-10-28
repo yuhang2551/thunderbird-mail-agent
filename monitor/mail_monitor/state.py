@@ -1,4 +1,4 @@
-"""状态：SQLite 里记三张表——处理过的邮件、见过的发件人、每次运行。
+"""状态：SQLite 里记三张表——处理过的邮件、见过的发件人、每次运行；另有一张 meta 表记零碎的状态（比如上次发的是几点那次汇总）。
 
 这是 Agent 的记忆。去重靠 messages 表；"这是谁"靠 senders 表（规则、模型、你自己都能写，优先级 你 > 规则 > 模型）；
 "同一话题之前说了什么"靠 messages 表按 (folder_path, thread_id) 或归一化主题查。memory.py 负责把这些整理成给模型看的文字。
@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS runs (
   new INTEGER DEFAULT 0,
   pushed INTEGER DEFAULT 0,
   errors TEXT
+);
+
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
 );
 """
 
@@ -176,6 +181,14 @@ class State:
         return self.conn.execute(
             "SELECT * FROM messages WHERE digest_pending = 1 ORDER BY received_at ASC"
         ).fetchall()
+
+    def get_meta(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+        self.conn.commit()
 
     def mark_digested(self, ids: Iterable[str]) -> None:
         now = utcnow()

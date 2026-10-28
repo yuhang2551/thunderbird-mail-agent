@@ -127,19 +127,27 @@ launchd 的 PATH 和终端不一样。用 `which claude` 看完整路径，写�
 - 要处理、拿不准的：每小时查到就推；23:00 到 08:00 免打扰，先进汇总，8 点那次一起发。
 - 其余知道就行的：每天 8、12、18 点各一张「邮件汇总」。
 
-想改：免打扰时段是 `.env` 里的 `MAIL_MONITOR_QUIET_HOURS`，汇总的钟点是装定时任务时的 `DIGEST_HOURS`（见下面）。
+想改：都在 `.env` 里，免打扰时段是 `MAIL_MONITOR_QUIET_HOURS`，汇总的钟点是 `MAIL_MONITOR_DIGEST_HOURS`，都按 `MAIL_MONITOR_TZ` 的钟点算。
+
+**汇总到的钟点不对**
+
+先看 `mail-monitor doctor` 里「汇总」那行的钟点和时区对不对，时区是 `.env` 里的 `MAIL_MONITOR_TZ`。旧版本让 launchd 直接在 8、12、18 点跑汇总，而 launchd 只在开机时读一次时区：Mac 换了时区没重启，汇总就按旧时区的钟点到（比如开机时是北京时间，人到了迪拜，「18 点」那次在迪拜 14 点到）。现在改成 launchd 每个整点叫醒一次，到没到点由邮件监控按 `MAIL_MONITOR_TZ` 判断。2026-10-28 以前装的定时任务，`git pull` 后重跑一次 `./scripts/launchd.sh install` 就换成新的。
 
 **launchd 装了但好像没跑**
 
 - `./scripts/launchd.sh status` 能看到装没装、上次的退出码和日志最后几行。
-- Mac 睡眠时不跑，也不会为它叫醒 Mac。巡检错过的直接跳过，醒来后一小时内照常跑；汇总赶上睡眠的，醒来补发一次（见[苹果的 launchd 文档](https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html)）。
+- Mac 睡眠时不跑，也不会为它叫醒 Mac。巡检错过的直接跳过，醒来后一小时内照常跑；汇总赶上睡眠的，醒来补发一次，醒来时在免打扰时段里就留到 8 点（见[苹果的 launchd 文档](https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html)）。
 - 电脑关了或合盖超过 2 天，更早的邮件不会再自动判断，可以手动补一次：`mail-monitor run --days 7`。
 
 **想改频率或汇总时间**
 
+巡检频率在装定时任务时改：
+
 ```bash
-RUN_INTERVAL=120 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install
+RUN_INTERVAL=120 ./scripts/launchd.sh install
 ```
+
+汇总时间写在 `.env` 里，比如 `MAIL_MONITOR_DIGEST_HOURS=8,13,20`，不用重装定时任务。
 
 ## 数据和隐私
 

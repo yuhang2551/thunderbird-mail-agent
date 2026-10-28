@@ -62,19 +62,21 @@ macOS 用 launchd（比常驻进程稳：每次都是新进程，这次崩了下
 ./scripts/launchd.sh uninstall
 ```
 
-`install` 装上先 run 一次，之后每小时一次；每天 8、12、18 点各 digest 一次，8 点那次带上夜里免打扰时段留下的。`status` 看装没装、上次退出码、日志最后几行（每行开头是那次运行的时间）；`uninstall` 卸掉。
+`install` 装上先 run 一次，之后每小时一次；汇总每天 8、12、18 点各发一次，8 点那次带上夜里免打扰时段留下的。`status` 看装没装、上次退出码、日志最后几行（每行开头是那次运行的时间）；`uninstall` 卸掉。
 
-电脑睡眠时都不跑，也不会为它叫醒电脑：巡检睡眠中错过的直接跳过，醒来后一小时内照常查到，每次回看两天，所以邮件不会漏；汇总赶上睡眠的，醒来补发一次。
+几点发汇总由邮件监控自己按 `MAIL_MONITOR_TZ` 判断：launchd 每个整点叫醒 `mail-monitor digest --due` 一次，到了汇总钟点、而且这个钟点还没发过才真发，没到点就直接退出，不读邮件、不联网。不直接让 launchd 在 8、12、18 点跑，是因为它只在开机时读一次时区：Mac 换了时区没重启的话，它还按旧时区的钟点跑。
 
-间隔和时间可以改，比如每 30 分钟巡检、8 点 13 点 20 点汇总：`RUN_INTERVAL=1800 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install`。查得勤不会多花模型额度，模型只看新邮件，每封只判断一次。`./scripts/launchd.sh print` 只打印要装的内容，不安装。日志在 `~/.mail-monitor/logs/`。改汇总时间时，留一个在免打扰结束的钟点（默认 8 点），夜里留下的邮件才不用等到中午。
+电脑睡眠时都不跑，也不会为它叫醒电脑：巡检睡眠中错过的直接跳过，醒来后一小时内照常查到，每次回看两天，所以邮件不会漏；汇总赶上睡眠的，醒来补发一次，赶上免打扰时段就留到 8 点。
+
+巡检间隔可以改，比如每 30 分钟：`RUN_INTERVAL=1800 ./scripts/launchd.sh install`。查得勤不会多花模型额度，模型只看新邮件，每封只判断一次。汇总的钟点在 `.env` 里改，比如 `MAIL_MONITOR_DIGEST_HOURS=8,13,20`，不用重装定时任务；留一个在免打扰结束的钟点（默认 8 点），夜里留下的邮件才不用等到中午。`./scripts/launchd.sh print` 只打印要装的内容，不安装。日志在 `~/.mail-monitor/logs/`。
 
 装之前先跑一次 `mail-monitor init`，不然第一次巡检会把最近两天的邮件全推一遍；没跑过的话 `install` 会停下来提醒你。
 
 Linux 用 cron：
 
 ```
-0 * * * *       ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor run    >> ~/.mail-monitor/logs/run.log 2>&1
-0 8,12,18 * * * ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor digest >> ~/.mail-monitor/logs/digest.log 2>&1
+0 * * * * ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor run          >> ~/.mail-monitor/logs/run.log 2>&1
+0 * * * * ~/thunderbird-mail-agent/monitor/.venv/bin/mail-monitor digest --due >> ~/.mail-monitor/logs/digest.log 2>&1
 ```
 
 ## 配置
@@ -84,6 +86,7 @@ Linux 用 cron：
 | 模型 | `MAIL_MONITOR_LLM`、`DEEPSEEK_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`、`LLM_EXTRA_BODY`、`MAIL_MONITOR_CLAUDE_MODEL` | `api`（默认）走 OpenAI 兼容接口，默认 DeepSeek 的 `deepseek-flash`，并关掉它默认打开的思考模式。`claude` 调你 Mac 上已登录的 Claude Code，用 Claude Pro / Max 订阅，不用 key，模型默认 `sonnet`。都不配也能跑：规则没覆盖的邮件一律按"拿不准"推送。详见[模型后端](docs/model-backends.md) |
 | 画像 | `MAIL_MONITOR_PROFILE` | 一句话介绍你自己（在读什么、找什么工作、导师是谁），写进提示词；不填时模型只知道"在读研究生，同时在找工作" |
 | 推送 | `MAIL_MONITOR_NOTIFY` = `console` / `notify_hub` / `lark_app` / `lark_webhook` | 先用 `console` 在终端里看效果。装了 [notify-hub](https://github.com/yuhang2551/notify-hub) 的用 `notify_hub`，Lark 的配置都在它那里，这边不用填（找不到命令时用 `MAIL_MONITOR_NOTIFY_HUB_BIN` 写完整路径）。直接推的话，应用机器人要 `LARK_APP_ID`、`LARK_APP_SECRET`、`LARK_RECEIVE_ID`；群自定义机器人只要 `LARK_WEBHOOK_URL`（可选 `LARK_WEBHOOK_SECRET`） |
+| 汇总 | `MAIL_MONITOR_DIGEST_HOURS`（默认 `8,12,18`） | 每天几点发汇总，整点，逗号隔开。按 `MAIL_MONITOR_TZ` 的钟点算，改了不用重装定时任务 |
 | 免打扰 | `MAIL_MONITOR_QUIET_HOURS`（默认 `23:00-08:00`） | 这段时间里只即时推送规则写了 `urgency: high` 的，其余的进汇总，8 点那次一起发；写 `off` 关掉。按 `MAIL_MONITOR_TZ` 的钟点算，见下面的[什么时候推](#什么时候推) |
 | 规则 | `MAIL_MONITOR_RULES`（默认 `~/.mail-monitor/rules.yaml`） | 见 [rules.example.yaml](rules.example.yaml) |
 | 账号 | `MAIL_MONITOR_ACCOUNTS` | 只看某些账号；默认全部收件箱 |
@@ -102,7 +105,7 @@ Linux 用 cron：
 | 知道就行的、订阅 | 进汇总，每天 8、12、18 点各发一次 | 同左 |
 | 验证码这类 | 不推 | 不推 |
 
-免打扰时段用 `MAIL_MONITOR_QUIET_HOURS` 改，写 `off` 关掉；汇总的钟点用 `DIGEST_HOURS` 改（见上面的定时运行）。模型判断的「紧急」只写在卡片上，夜里不叫醒你：邮件的措辞能把模型带偏，夜里推不推只听你自己写的规则。推送失败的转进汇总，下一次汇总再带上。
+免打扰时段用 `MAIL_MONITOR_QUIET_HOURS` 改，写 `off` 关掉；汇总的钟点用 `MAIL_MONITOR_DIGEST_HOURS` 改。两个都按 `MAIL_MONITOR_TZ` 的钟点算，和 Mac 系统设置里的时区无关。模型判断的「紧急」只写在卡片上，夜里不叫醒你：邮件的措辞能把模型带偏，夜里推不推只听你自己写的规则。推送失败的转进汇总，下一次汇总再带上。
 
 ### 推送接到飞书 / Lark
 
@@ -111,7 +114,7 @@ Linux 用 cron：
 **A. 交给 notify-hub（推荐）**：[notify-hub](https://github.com/yuhang2551/notify-hub) 是本机的推送工具，几个项目共用：Lark 凭证在它那里配一次，邮件监控把消息交给它，它马上发成一张卡片。先按它的 README 装好，`notify-hub test` 能在手机上收到；再在 `.env` 里写 `MAIL_MONITOR_NOTIFY=notify_hub`，`mail-monitor doctor` 显示出 notify-hub 的版本就接上了。这时：
 
 - 每条即时推送是一张卡片，标题是「谁：什么事」，手机通知里一眼就能看到。规则写了 `urgency: high` 的是红色卡片，其余是蓝色。
-- 汇总是一张「邮件汇总 · N 封」的卡片。
+- 汇总是一张卡片，标题写几封、有没有要处理的，比如「邮件汇总 · 12 封，1 封要处理」；正文按要处理、可能要管、知道就行分组，见下面的[推送长什么样](#推送长什么样)。
 - notify-hub 连不上 Lark 时当场重试几次，还不行就告诉邮件监控：这封邮件转进汇总，下一次汇总再带上；汇总推不出去时，邮件也都还攒着。notify-hub 本身运行不了（没装、找不到命令）时也一样。
 
 **B. 群自定义机器人（最省事，但有的租户没开）**：电脑端 Lark 打开一个群 → 设置 → 群机器人 → 添加机器人 → 自定义机器人 → 复制 webhook。写进 `.env`：`MAIL_MONITOR_NOTIFY=lark_webhook`、`LARK_WEBHOOK_URL=…`、可选 `LARK_WEBHOOK_SECRET=…`（签名校验）。
@@ -163,17 +166,20 @@ mail-monitor lark-chats --email 你的邮箱
 汇总（每天 8、12、18 点各一次）：
 
 ```
-📮 邮件汇总 10-13 18:00 · 共 12 封
+📮 邮件汇总 10-13 18:00 · 12 封，1 封要处理
 
-需要处理（1）
-• 导师：要周五前交更新后的数字（期限 2026-10-17） [School 10-13 14:02]
+🔴 需要处理（1）
+• 导师：要周五前交更新后的数字
+　期限 10-17 · School 14:02
 
-知道就行（3）
-• 学校活动办公室：周四 4 点讲座，周三中午前报名 [School 10-12 19:10]
-…
+⚪ 知道就行（3）
+• 学校活动办公室：周四 4 点讲座，周三中午前报名
+• 某银行 ×2：信用卡有一笔消费
 
-已忽略：订阅/通知 8
+🔕 已忽略：订阅/通知 8
 ```
+
+手机上要一屏扫完，所以一封最多两行：要处理和可能要管的第二行写期限、邮箱和时间（今天收的只写钟点），知道就行的只写谁和什么事，同一个地址连发的合成一行，超过 12 行只写还剩几封；太长的摘要去掉括号里的补充，再按逗号截短。经过 notify-hub 时，第一行换成卡片标题「邮件汇总 · 12 封，1 封要处理」。
 
 ## 判断是怎么做的
 

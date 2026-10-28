@@ -1,8 +1,14 @@
 from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from mail_monitor.config import Settings, load_settings, parse_quiet_hours
+from mail_monitor.config import (
+    Settings,
+    load_settings,
+    parse_digest_hours,
+    parse_quiet_hours,
+)
 
 
 @pytest.mark.parametrize(
@@ -51,3 +57,38 @@ def test_quiet_hours_from_the_env_file(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="MAIL_MONITOR_QUIET_HOURS"):
         load_settings(env)
     assert load_settings(tmp_path / "none.env").quiet_window == (time(23), time(8))
+
+
+@pytest.mark.parametrize(("text", "hours"), [("8,12,18", [8, 12, 18]), ("18 8 12 8", [8, 12, 18]), ("8:00、18:00", [8, 18]), ("0", [0])])
+def test_parse_digest_hours(text, hours):
+    assert parse_digest_hours(text) == hours
+
+
+@pytest.mark.parametrize("text", ["", "8,25", "8:30", "早上"])
+def test_bad_digest_hours_are_explained(text):
+    with pytest.raises(ValueError, match="整点|至少"):
+        parse_digest_hours(text)
+
+
+def _at(day: int, hour: int, minute: int = 0) -> datetime:
+    return datetime(2026, 10, day, hour, minute, tzinfo=ZoneInfo("Asia/Dubai"))
+
+
+@pytest.mark.parametrize(
+    ("now", "slot"),
+    [(_at(13, 8), _at(13, 8)), (_at(13, 13, 5), _at(13, 12)), (_at(13, 23, 59), _at(13, 18)), (_at(13, 7, 59), _at(12, 18))],
+)
+def test_latest_digest_slot_follows_the_configured_time_zone(now, slot):
+    # 传进来的是 UTC 时间也一样：钟点按 MAIL_MONITOR_TZ 算
+    assert Settings(timezone="Asia/Dubai").latest_digest_slot(now.astimezone(timezone.utc)) == slot
+
+
+def test_digest_hours_from_the_env_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAIL_MONITOR_DIGEST_HOURS", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("MAIL_MONITOR_DIGEST_HOURS=21 9\n", encoding="utf-8")
+    assert load_settings(env).digest_hour_list == [9, 21]
+    env.write_text("MAIL_MONITOR_DIGEST_HOURS=9:30\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="MAIL_MONITOR_DIGEST_HOURS"):
+        load_settings(env)
+    assert load_settings(tmp_path / "none.env").digest_hour_list == [8, 12, 18]
