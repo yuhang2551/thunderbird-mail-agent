@@ -51,7 +51,7 @@ After installing, run `mail-monitor init` once to register existing mail as seen
 **Nothing arrives on my phone**
 
 - Run `mail-monitor notify-test` first and read the error.
-- With notify_hub: run `notify-hub test` first; the mail monitor can only get through once that does. If `mail-monitor doctor` shows no notify-hub version, the command cannot be found: run `which notify-hub` in a terminal to see where it is and put that path in `MAIL_MONITOR_NOTIFY_HUB_BIN` in `.env`. If `notify-test` says the message was not sent and stays in the outbox, notify-hub cannot reach Lark and will retry by itself; `notify-hub status` shows how many messages are waiting.
+- With notify_hub: run `notify-hub test` first; the mail monitor can only get through once that does. If `mail-monitor doctor` shows no notify-hub version, the command cannot be found: run `which notify-hub` in a terminal to see where it is and put that path in `MAIL_MONITOR_NOTIFY_HUB_BIN` in `.env`. If `notify-test` reports "没发出去" (not sent) followed by notify-hub's own words: "cannot reach Lark" means a network or Lark problem, and notify-hub has already retried a couple of times on the spot; a missing `LARK_APP_ID` or the like means notify-hub's configuration is not filled in.
 - App bot: is the permission on (`im:message:send_as_bot`), is the version published, is the bot in that group, and is `LARK_RECEIVE_ID` right (`oc_` is a chat, `ou_` is you)? If you also set `LARK_RECEIVE_ID_TYPE`, it must match the id (`chat_id` goes with a group id, `open_id` with your user id); when unsure, delete that line and the program works it out.
 - Group custom bot: if the group has signature checks on, `LARK_WEBHOOK_SECRET` must be set.
 - For Feishu (the China edition) set `LARK_DOMAIN` to `https://open.feishu.cn`.
@@ -59,9 +59,7 @@ After installing, run `mail-monitor init` once to register existing mail as seen
 
 **Mail that arrived at night only reaches me in the morning**
 
-With notify_hub, that is notify-hub's quiet hours: normal messages between 23:00 and 08:00 are held and go out as one combined card at 08:00. Rules with `urgency: high` (the advisor rule in `rules.example.yaml`) are sent as urgent and are delivered at night too; to get someone's mail at night, write such a rule for them. The model's "urgent" does not count, because an email's wording can sway it. Change the quiet hours in notify-hub's `.env`: `NOTIFY_HUB_QUIET_HOURS=23:00-08:00`, or `off` to turn them off.
-
-notify-hub also sends at most 20 messages per source per hour; anything beyond that goes into its daily 18:00 digest. You will rarely hit it; the setting is `NOTIFY_HUB_RATE_LIMIT`.
+That is the mail monitor's quiet hours: between 23:00 and 08:00, mail that would be pushed right away goes into the digest instead and arrives with the 08:00 one. Rules with `urgency: high` (the advisor rule in `rules.example.yaml`) are still pushed right away at night; to get someone's mail at night, write such a rule for them. The model's "urgent" does not count, because an email's wording can sway it. Change the quiet hours in `~/.mail-monitor/.env`: `MAIL_MONITOR_QUIET_HOURS=23:00-08:00`, or `off` to turn them off.
 
 **Too many pushes**
 
@@ -121,10 +119,20 @@ See [Model backends](model-backends_EN.md). The ChatGPT subscription version is 
 
 ## Running on a schedule
 
+**When do pushes arrive?**
+
+The mail monitor decides all the timing, whether pushes go through notify-hub or straight to Lark:
+
+- Rules with `urgency: high` (your advisor, say): as soon as the hourly check finds them, at night too.
+- Needs action or unsure: as soon as the hourly check finds them; during quiet hours (23:00 to 08:00) they go into the digest and arrive with the 08:00 one.
+- Everything else worth knowing: one "邮件汇总" (mail digest) card at 08:00, 12:00 and 18:00.
+
+To change it: quiet hours are `MAIL_MONITOR_QUIET_HOURS` in `.env`, and the digest hours are `DIGEST_HOURS` when installing the scheduled job (see below).
+
 **launchd is installed but nothing seems to run**
 
 - `./scripts/launchd.sh status` shows whether it is installed, the last exit code and the last lines of the logs.
-- Nothing runs while the Mac sleeps; one catch-up run happens on wake.
+- Nothing runs while the Mac sleeps, and the Mac is not woken for it. Missed checks are skipped and the next one comes within the hour after waking; a digest that fell during sleep is sent once on wake (see [Apple's launchd documentation](https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html)).
 - If the computer was off or closed for more than 2 days, older mail is no longer judged automatically; catch up once by hand with `mail-monitor run --days 7`.
 
 **Changing the interval or the digest hours**

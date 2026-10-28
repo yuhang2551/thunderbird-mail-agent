@@ -1,12 +1,14 @@
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+import pytest
 
 from mail_monitor.classify import LLMClassifier
 from mail_monitor.llm import LLMClient
-from mail_monitor.notify import ConsoleNotifier
+from mail_monitor.notify import ConsoleNotifier, NotifyError
 from mail_monitor.pipeline import init_seen, run_once, send_digest
 from mail_monitor.rules import RuleSet
 from mail_monitor.state import State
@@ -101,8 +103,8 @@ rules:
     assert rows["<seminar-1@example.edu>"]["notify_mode"] == "digest"
     assert report.pushed == 2 and report.digest_pending == 3 and report.ignored == 1
     assert report.tagged == 2  # 两封"需要处理"的打了标签
-    levels = {push.key: push.level for push in notifier.pushes}
-    assert levels == {"<prof-1@example.edu>": "urgent", "<hr-1@quantfirm.example>": "normal"}  # 规则写了 urgency: high 才算紧急
+    levels = {push.title: push.level for push in notifier.pushes}
+    assert levels == {"导师：要周五前交更新后的数字": "urgent", "量化公司 HR：约下周二面试，明天前确认": "normal"}  # 规则写了 urgency: high 才算紧急
 
     digest_count = await send_digest(settings, state=state, notifier=notifier)
     assert digest_count == 3
@@ -197,3 +199,74 @@ async def test_run_reports_error_when_thunderbird_is_closed(settings):
     report = await run_once(dead, notifier=ConsoleNotifier())
     assert report.fetched == 0 and report.pushed == 0
     assert any("连不上 Thunderbird" in error for error in report.errors)
+
+
+QUIET_RULES = """
+rules:
+  - name: 导师
+    match: { from_email: prof@example.edu }
+    then: { category: 导师/课题组, who: 导师, needs_action: yes, urgency: high }
+  - name: 验证码
+    match: { subject_regex: "(?i)verification code" }
+    then: { needs_action: no, notify: never }
+  - name: 订阅
+    match: { from_regex: ["(?i)newsletter", "(?i)notifications?@"] }
+    then: { category: 订阅/通知, needs_action: no, notify: digest }
+"""
+NIGHT = datetime(2026, 10, 13, 20, 30, tzinfo=timezone.utc)  # 迪拜 00:30
+DAY = datetime(2026, 10, 14, 6, 30, tzinfo=timezone.utc)  # 迪拜 10:30
+
+
+async def test_quiet_hours_keep_all_but_rule_urgent_mail_for_the_digest(settings):
+    """23:00-08:00 只即时推送规则写了 urgency: high 的（导师）；其余本该即时推送的进汇总，8 点那次一起发。"""
+    settings = settings.model_copy(update={"quiet_hours": "23:00-08:00"})
+    rules = RuleSet.from_yaml(QUIET_RULES)
+    state = State(":memory:")
+    notifier = ConsoleNotifier()
+
+    report = await run_once(settings, state=state, notifier=notifier, rules=rules, now=NIGHT)
+    assert [(push.title, push.level) for push in notifier.pushes] == [("导师：Re: DoAtlas-2 progress numbers", "urgent")]
+    assert report.pushed == 1 and report.held == 2 and report.digest_pending == 4 and report.ignored == 1
+    assert "待汇总 4（含免打扰时段留下的 2）" in report.summary()
+
+    hr = state.conn.execute("SELECT * FROM messages WHERE id = '<hr-1@quantfirm.example>'").fetchone()
+    assert hr["notify_mode"] == "instant" and hr["digest_pending"] == 1 and hr["pushed_at"] is None
+    state.set_label("<hr-1@quantfirm.example>", "yes")
+    assert state.evaluation()["caught"] == 1  # 评的是判断：判成即时推送就算抓到了，免打扰只是晚点到
+
+    assert await send_digest(settings, state=state, notifier=notifier) == 4
+    assert "Interview invitation" in notifier.sent[-1] and "Seminar" in notifier.sent[-1]
+
+
+async def test_outside_quiet_hours_or_with_them_off_everything_goes_out_at_once(settings):
+    rules = RuleSet.from_yaml(QUIET_RULES)
+    day = await run_once(settings.model_copy(update={"quiet_hours": "23:00-08:00"}), state=State(":memory:"), notifier=ConsoleNotifier(), rules=rules, now=DAY)
+    off = await run_once(settings, state=State(":memory:"), notifier=ConsoleNotifier(), rules=rules, now=NIGHT)
+    for report in (day, off):
+        assert report.pushed == 3 and report.held == 0 and report.digest_pending == 2
+
+
+class DownNotifier:
+    """notify-hub 重试完还是推不出去。"""
+
+    name = "down"
+
+    async def send(self, push) -> None:
+        raise NotifyError("notify-hub 退出码 1：❌ 没发出去：发送消息：连不上 Lark（ConnectError）")
+
+
+async def test_a_failed_push_waits_for_the_next_digest(settings):
+    rules = RuleSet.from_yaml(QUIET_RULES)
+    state = State(":memory:")
+
+    report = await run_once(settings, state=state, notifier=DownNotifier(), rules=rules, now=DAY)
+    assert report.pushed == 0 and report.digest_pending == 5
+    assert len(report.errors) == 3 and all("推送失败，转入汇总" in error for error in report.errors)
+    prof = state.conn.execute("SELECT * FROM messages WHERE id = '<prof-1@example.edu>'").fetchone()
+    assert prof["notify_mode"] == "instant" and prof["digest_pending"] == 1 and prof["pushed_at"] is None
+
+    with pytest.raises(NotifyError):
+        await send_digest(settings, state=state, notifier=DownNotifier())
+    notifier = ConsoleNotifier()
+    assert await send_digest(settings, state=state, notifier=notifier) == 5  # 汇总也没推出去时，邮件都还攒着
+    assert "DoAtlas-2" in notifier.sent[-1]

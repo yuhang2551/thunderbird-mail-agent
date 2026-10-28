@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
+from datetime import datetime, time
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, Field
@@ -53,6 +56,9 @@ class Settings(BaseModel):
     claude_timeout: float = 180.0  # 一封邮件最多等几秒
 
     # 推送
+    # 免打扰时段（按 timezone 的钟点）：这段时间里只即时推送规则写了 urgency: high 的，其余的进汇总，
+    # 免打扰结束时的那次汇总（默认 8 点）一起发；写 off 关掉
+    quiet_hours: str = "23:00-08:00"
     notify_backend: NotifyBackend = "console"
     notify_hub_bin: str = "notify-hub"  # notify_hub 推送调用的命令；launchd 下找不到时写完整路径
     lark_domain: str = "https://open.larksuite.com"  # 飞书国内版改成 https://open.feishu.cn
@@ -92,6 +98,22 @@ class Settings(BaseModel):
         return self.home / "claude-run"
 
     @property
+    def quiet_window(self) -> tuple[time, time] | None:
+        return parse_quiet_hours(self.quiet_hours)
+
+    def in_quiet_hours(self, now: datetime) -> bool:
+        """now 落在免打扰时段里吗？按 timezone（不填就是本机时区）的钟点算，开始算在里面、结束不算。"""
+        window = self.quiet_window
+        if window is None:
+            return False
+        start, end = window
+        tz = ZoneInfo(self.timezone) if self.timezone else None
+        clock = now.astimezone(tz).time().replace(tzinfo=None)
+        if start < end:
+            return start <= clock < end
+        return clock >= start or clock < end  # 跨午夜，比如 23:00-08:00
+
+    @property
     def resolved_llm_extra_body(self) -> dict[str, Any]:
         if self.llm_extra_body is not None:
             return self.llm_extra_body
@@ -99,6 +121,26 @@ class Settings(BaseModel):
         if "deepseek.com" in self.llm_base_url:
             return {"thinking": {"type": "disabled"}}
         return {}
+
+
+_QUIET_HOURS = re.compile(r"(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})")
+
+
+def parse_quiet_hours(value: str) -> tuple[time, time] | None:
+    """「23:00-08:00」→（23:00, 08:00）；off → None。写错了抛 ValueError。"""
+    text = value.strip()
+    if text.lower() == "off":
+        return None
+    match = _QUIET_HOURS.fullmatch(text)
+    if not match:
+        raise ValueError(f"要写成 开始-结束，比如 23:00-08:00，或者 off 关掉：{value!r}")
+    h1, m1, h2, m2 = (int(part) for part in match.groups())
+    if h1 > 23 or h2 > 23 or m1 > 59 or m2 > 59:
+        raise ValueError(f"钟点要在 00:00 到 23:59 之间：{value!r}")
+    start, end = time(h1, m1), time(h2, m2)
+    if start == end:
+        raise ValueError(f"开始和结束不能是同一个时间：{value!r}")
+    return start, end
 
 
 def resolve_binary(binary: str) -> str:
@@ -138,6 +180,7 @@ ENV_MAP: dict[str, str] = {
     "MAIL_MONITOR_CLAUDE_BIN": "claude_bin",
     "MAIL_MONITOR_CLAUDE_MODEL": "claude_model",
     "MAIL_MONITOR_CLAUDE_TIMEOUT": "claude_timeout",
+    "MAIL_MONITOR_QUIET_HOURS": "quiet_hours",
     "MAIL_MONITOR_NOTIFY": "notify_backend",
     "MAIL_MONITOR_NOTIFY_HUB_BIN": "notify_hub_bin",
     "LARK_DOMAIN": "lark_domain",
@@ -177,6 +220,9 @@ def _coerce(field: str, raw: str) -> Any:
         if choice not in ("api", "claude"):
             raise ValueError("只能是 api 或 claude")
         return choice
+    if field == "quiet_hours":
+        window = parse_quiet_hours(value)
+        return "off" if window is None else f"{window[0]:%H:%M}-{window[1]:%H:%M}"
     if field in _JSON_FIELDS:
         try:
             data = json.loads(value)

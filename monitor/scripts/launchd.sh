@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# 把 mail-monitor 装成 macOS 的定时任务（launchd）：每小时 run 一次，早 9 点和晚 6 点各 digest 一次。
+# 把 mail-monitor 装成 macOS 的定时任务（launchd）：每小时 run 一次，每天 8、12、18 点各 digest 一次（8 点那次带上夜里免打扰时段留下的）。
 # 用法：./scripts/launchd.sh install | uninstall | status | print（只打印要装的 plist，不安装）
 # 可选环境变量：MAIL_MONITOR_BIN（默认 monitor/.venv/bin/mail-monitor）、RUN_INTERVAL（秒，默认 3600）、
-#              DIGEST_HOURS（默认 "9 18"）、MAIL_MONITOR_HOME（默认 ~/.mail-monitor）
-# 电脑睡眠时任务不跑，醒来后 launchd 会补跑一次；装上和开机登录时 run 也先跑一次，所以不会漏邮件。
+#              DIGEST_HOURS（默认 "8 12 18"）、MAIL_MONITOR_HOME（默认 ~/.mail-monitor）
+# 电脑睡眠时任务不跑，launchd 也不会为它叫醒电脑。run 按间隔跑，睡眠中错过的直接跳过，醒来后到下一个间隔照常跑；
+# digest 按钟点跑，赶上睡眠的醒来补跑一次。装上和开机登录时 run 先跑一次；每次巡检回看两天，所以睡眠期间的邮件不会漏。
 set -euo pipefail
 
 MONITOR_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -13,7 +14,7 @@ LOG_DIR="$HOME_DIR/logs"
 AGENTS="$HOME/Library/LaunchAgents"
 PREFIX="com.thunderbird-mail-agent.mail-monitor"
 RUN_INTERVAL="${RUN_INTERVAL:-3600}"
-DIGEST_HOURS="${DIGEST_HOURS:-9 18}"
+DIGEST_HOURS="${DIGEST_HOURS:-8 12 18}"
 NODE_DIR="$(dirname "$(command -v node 2>/dev/null || echo /usr/local/bin/node)")"
 # Claude 订阅版（MAIL_MONITOR_LLM=claude）要调用 claude；官方安装器默认装在 ~/.local/bin
 CLAUDE_DIR="$(dirname "$(command -v claude 2>/dev/null || echo "$HOME/.local/bin/claude")")"

@@ -147,8 +147,14 @@ class State:
         self.conn.commit()
         return count
 
-    def record(self, header: MessageHeader, decision: Decision, *, notify_mode: str, pushed: bool) -> None:
+    def record(
+        self, header: MessageHeader, decision: Decision, *, notify_mode: str, pushed: bool, to_digest: bool | None = None
+    ) -> None:
+        """notify_mode 是判断出的推送方式；to_digest 是这封要不要等汇总，不写就看 notify_mode 是不是 digest
+        （本该即时推送、赶上免打扰或推送失败的，notify_mode 还是 instant，to_digest=True）。"""
         now = utcnow()
+        if to_digest is None:
+            to_digest = notify_mode == "digest"
         self.conn.execute(
             """INSERT OR REPLACE INTO messages
                (id, account, folder_path, thread_id, sender_email, sender_name, subject, subject_key, received_at, first_seen_at,
@@ -161,7 +167,7 @@ class State:
                 header.date.isoformat() if header.date else None, now,
                 decision.category, decision.needs_action, decision.urgency, decision.deadline,
                 decision.who, decision.what, decision.suggested_action, decision.decided_by, decision.rule_name,
-                notify_mode, now if pushed else None, 1 if notify_mode == "digest" else 0,
+                notify_mode, now if pushed else None, 1 if to_digest else 0,
             ),
         )
         self.conn.commit()
@@ -198,7 +204,8 @@ class State:
         return cur.rowcount > 0
 
     def evaluation(self) -> dict[str, Any]:
-        """拿标过的邮件算：需要处理的有没有漏推、即时推送里有多少噪声、各来源判对多少。"""
+        """拿标过的邮件算：需要处理的有没有漏推、即时推送里有多少噪声、各来源判对多少。
+        这里的「即时推送」指判断结果（notify_mode），赶上免打扰或推送失败、最后进了汇总的也算：评的是判断准不准。"""
         rows = self.conn.execute(
             "SELECT needs_action, notify_mode, decided_by, label FROM messages WHERE label IS NOT NULL"
         ).fetchall()

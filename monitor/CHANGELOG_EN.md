@@ -6,9 +6,32 @@ Recorded increment by increment: what each step added, how far it was verified o
 
 ## Next
 
-1. When the first new mail arrives, check `./scripts/launchd.sh status`: the scheduled job should call Claude for the verdict and push through notify-hub.
-2. Use it for a week: label with `review`, check the miss and noise rates with `eval`, and tune the rules and prompt from the results. Along the way, replace the example address in the advisor rule of `rules.yaml` and set `MAIL_MONITOR_PROFILE`.
-3. The ChatGPT subscription version (designed in [Model backends](docs/model-backends_EN.md), not urgent).
+1. On the Mac, first upgrade notify-hub to 0.3 following "Upgrading from 0.2" in its [README](https://github.com/yuhang2551/notify-hub/blob/main/README_EN.md#upgrading-from-02): send what 0.2 is holding, remove its scheduled job, then upgrade. Then `git pull` here and run `./scripts/launchd.sh install` once more to move the digest to 08:00, 12:00 and 18:00.
+2. When the first new mail arrives, check `./scripts/launchd.sh status`: the scheduled job should call Claude for the verdict and push through notify-hub.
+3. Use it for a week: label with `review`, check the miss and noise rates with `eval`, and tune the rules and prompt from the results. Along the way, replace the example address in the advisor rule of `rules.yaml` and set `MAIL_MONITOR_PROFILE`.
+4. The ChatGPT subscription version (designed in [Model backends](docs/model-backends_EN.md), not urgent).
+
+## 2026-10-28 · The mail monitor decides when to push
+
+**Why**
+
+notify-hub 0.2 kept time of its own: quiet hours, a digest and a scheduled job three times a day. The mail monitor had its own scheduled job and digest too. With two schedules, working out when a notification would arrive meant putting both sets of settings side by side. notify-hub 0.3 now only sends right away (see its [changelog](https://github.com/yuhang2551/notify-hub/blob/main/CHANGELOG_EN.md)), and all the timing is decided here.
+
+**Changed**
+
+- The digest now goes out three times a day by default, at 08:00, 12:00 and 18:00, instead of twice at 09:00 and 18:00. `DIGEST_HOURS` still changes it.
+- New quiet hours, `MAIL_MONITOR_QUIET_HOURS`, default `23:00-08:00`, on the clock of `MAIL_MONITOR_TZ` (the computer's time zone when unset). During them only rules with `urgency: high` (your advisor, say) are pushed right away; everything else that would be pushed right away goes into the digest and arrives with the 08:00 one. `off` turns them off. The model's "urgent" does not count, because an email's wording can sway the model.
+- Mail whose push fails goes into the next digest; notify-hub first retries a few times on the spot, and only then does it count as failed. When the digest itself cannot be sent, the mail stays queued, `digest` exits with an error, and the next digest carries it.
+- Mail that was held for quiet hours or whose push failed still counts as "judged push right away", so the miss rate in `eval` measures only whether the verdict was right, not when the push arrived.
+- notify-hub no longer gets `--key`: 0.3 does not deduplicate, and whether a message was pushed is already recorded in the database here. This version still works with the old notify-hub 0.2.1, and `doctor` suggests upgrading.
+- `doctor` shows one more line, the quiet hours. `notify-test` now sends at normal level: it used urgent so that notify-hub's quiet hours would not hold it, and notify-hub no longer holds anything.
+- 124 tests. The new ones cover how quiet hours are written and the check across midnight, only advisor-type mail being pushed at night, and no mail being lost when an instant push or the digest cannot be sent.
+
+**Docs corrected**
+
+- The README, architecture and FAQ no longer say that notify-hub handles quiet hours, deduplication and resending; the README has a new section, "When pushes arrive".
+- Several places said "nothing runs while the Mac sleeps, one catch-up run happens on wake", which is wrong for the checks. According to [Apple's launchd documentation](https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html), an interval job (the check) skips the runs it missed during sleep and runs again at the next interval after waking; a calendar job (the digest) that fell during sleep runs once on wake. launchd also never wakes the computer for a job. Each check looks back two days, so mail that arrived during sleep is not missed, it just arrives up to an hour after waking.
+- The top-level README still said the monitor checks every 5 minutes; it now says every hour.
 
 ## 2026-10-28 · The schedule checks hourly, running on the Mac
 

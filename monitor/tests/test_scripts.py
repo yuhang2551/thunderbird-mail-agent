@@ -68,7 +68,8 @@ def test_launchd_checks_hourly_and_once_at_load(tmp_path: Path):
     assert run["StartInterval"] == 3600
     assert run["RunAtLoad"] is True  # 装上、开机登录时先巡检一次，不用等一小时
     assert digest["RunAtLoad"] is False  # 汇总只在定好的时间发
-    assert [(e["Hour"], e["Minute"]) for e in digest["StartCalendarInterval"]] == [(9, 0), (18, 0)]
+    # 早中晚三次；免打扰时段（默认 23:00-08:00）留下的，跟 8 点那次一起到
+    assert [(e["Hour"], e["Minute"]) for e in digest["StartCalendarInterval"]] == [(8, 0), (12, 0), (18, 0)]
     # claude 和 notify-hub 的官方装法都在 ~/.local/bin，launchd 默认的 PATH 里没有
     assert f"{tmp_path}/.local/bin" in run["EnvironmentVariables"]["PATH"].split(":")
 

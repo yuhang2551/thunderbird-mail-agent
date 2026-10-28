@@ -5,11 +5,11 @@
 #               subject_contains、subject_regex、account（账号名或 id 的一部分）。多个条件要同时满足。
 # then 可以写：category、who（这是谁，推送时显示）、needs_action（yes / no / unsure）、urgency（high / normal / low）、
 #              notify（instant / digest / never）、llm（true = 仍让模型写摘要，但 then 里的字段覆盖模型）、note。
-# 推送交给 notify-hub 时，只有规则里写了 urgency: high 的即时推送夜里也发，其余的在免打扰时段先存着。
+# 只有规则里写了 urgency: high 的，免打扰时段（MAIL_MONITOR_QUIET_HOURS，默认 23:00-08:00）也马上推；其余的先进汇总，8 点那次一起发。
 # 注意 YAML 会把不加引号的 yes/no 读成布尔值，程序能认，但写成 "yes" 更清楚。
 
 rules:
-  # 导师：一律即时推送、标紧急（经过 notify-hub 时夜里也推），但摘要让模型写
+  # 导师：一律即时推送、标紧急（免打扰时段也推），但摘要让模型写
   - name: 导师
     match:
       from_email: ["advisor@example.edu"]

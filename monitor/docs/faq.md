@@ -51,7 +51,7 @@ PYTHON="$(~/.local/bin/uv python find 3.13)" ./scripts/install.sh
 **手机上没收到**
 
 - 先跑 `mail-monitor notify-test`，看它报什么错。
-- 用 notify_hub 的：先跑 `notify-hub test`，它通了邮件监控才会通。`mail-monitor doctor` 里看不到 notify-hub 的版本，就是找不到这个命令：终端里 `which notify-hub` 看它装在哪，写进 `.env` 的 `MAIL_MONITOR_NOTIFY_HUB_BIN`。`notify-test` 说"没发出去，留在发件箱里"，是 notify-hub 连不上 Lark，它会自己重发，`notify-hub status` 能看到发件箱里还有几条。
+- 用 notify_hub 的：先跑 `notify-hub test`，它通了邮件监控才会通。`mail-monitor doctor` 里看不到 notify-hub 的版本，就是找不到这个命令：终端里 `which notify-hub` 看它装在哪，写进 `.env` 的 `MAIL_MONITOR_NOTIFY_HUB_BIN`。`notify-test` 报「没发出去」，后面跟着 notify-hub 的原话：连不上 Lark 是网络或 Lark 的问题，它已经当场重试过几次了；缺 `LARK_APP_ID` 之类是 notify-hub 的配置没填好。
 - 应用机器人：权限开了没有（`im:message:send_as_bot`），版本发布了没有，机器人在不在那个群里，`LARK_RECEIVE_ID` 对不对（`oc_` 开头是群，`ou_` 开头是你本人）；另外写了 `LARK_RECEIVE_ID_TYPE` 的话，要和 id 对得上（`chat_id` 配群 id，`open_id` 配你的用户 id），不确定就删掉这一行让程序自己判断。
 - 群自定义机器人：群里开了签名校验的话，`LARK_WEBHOOK_SECRET` 要填。
 - 飞书国内版要把 `LARK_DOMAIN` 改成 `https://open.feishu.cn`。
@@ -59,9 +59,7 @@ PYTHON="$(~/.local/bin/uv python find 3.13)" ./scripts/install.sh
 
 **夜里来的邮件，早上才收到**
 
-用 notify_hub 推送时，这是 notify-hub 的免打扰：23:00 到 08:00 之间的普通消息先存着，08:00 合成一张卡发。规则里写了 `urgency: high` 的（`rules.example.yaml` 里导师那条）按紧急发，夜里也推；想让某个人的邮件夜里也推，就给他写一条这样的规则。模型判断的"紧急"不算，因为它会被邮件措辞带偏。免打扰时段在 notify-hub 的 `.env` 里改：`NOTIFY_HUB_QUIET_HOURS=23:00-08:00`，写 `off` 关掉。
-
-另外 notify-hub 对同一个来源一小时最多推 20 条，再多的进它每天 18:00 的汇总，一般碰不到；要改是 `NOTIFY_HUB_RATE_LIMIT`。
+这是邮件监控的免打扰：23:00 到 08:00 之间，本该马上推的邮件先进汇总，8 点那次一起发。规则里写了 `urgency: high` 的（`rules.example.yaml` 里导师那条）夜里也马上推；想让某个人的邮件夜里也推，就给他写一条这样的规则。模型判断的「紧急」不算，因为它会被邮件措辞带偏。免打扰时段在 `~/.mail-monitor/.env` 里改：`MAIL_MONITOR_QUIET_HOURS=23:00-08:00`，写 `off` 关掉。
 
 **推得太多**
 
@@ -121,10 +119,20 @@ launchd 的 PATH 和终端不一样。用 `which claude` 看完整路径，写�
 
 ## 定时运行
 
+**推送都在什么时间到？**
+
+时间都由邮件监控定，不管推送走 notify-hub 还是直接推 Lark：
+
+- 规则里写了 `urgency: high` 的（比如导师）：每小时查到就推，夜里也推。
+- 要处理、拿不准的：每小时查到就推；23:00 到 08:00 免打扰，先进汇总，8 点那次一起发。
+- 其余知道就行的：每天 8、12、18 点各一张「邮件汇总」。
+
+想改：免打扰时段是 `.env` 里的 `MAIL_MONITOR_QUIET_HOURS`，汇总的钟点是装定时任务时的 `DIGEST_HOURS`（见下面）。
+
 **launchd 装了但好像没跑**
 
 - `./scripts/launchd.sh status` 能看到装没装、上次的退出码和日志最后几行。
-- Mac 睡眠时不跑，醒来后会补跑一次。
+- Mac 睡眠时不跑，也不会为它叫醒 Mac。巡检错过的直接跳过，醒来后一小时内照常跑；汇总赶上睡眠的，醒来补发一次（见[苹果的 launchd 文档](https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html)）。
 - 电脑关了或合盖超过 2 天，更早的邮件不会再自动判断，可以手动补一次：`mail-monitor run --days 7`。
 
 **想改频率或汇总时间**

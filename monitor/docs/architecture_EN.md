@@ -6,7 +6,7 @@ This document covers what the mail-monitor agent is made of, what happens during
 
 ## In one sentence
 
-Every hour (configurable) it wakes up and sorts new mail into "needs action", "unsure", "for your information" and "ignore": the first two are pushed to Lark right away, "for your information" is batched into a morning and an evening digest, and "ignore" is only recorded. Each verdict draws on what it remembers: who the sender is, and what was said earlier about the same matter.
+Every hour (configurable) it wakes up and sorts new mail into "needs action", "unsure", "for your information" and "ignore": the first two are pushed to Lark right away, "for your information" is batched into three digests a day (08:00, 12:00 and 18:00), and "ignore" is only recorded. Between 23:00 and 08:00 only mail your rules mark urgent (your advisor, say) is pushed; the rest waits for the 08:00 digest. Each verdict draws on what it remembers: who the sender is, and what was said earlier about the same matter.
 
 ## 1. The parts
 
@@ -18,8 +18,8 @@ An agent is usually split into perception, decision, action, memory and push. Ea
 | Decision | Rules go first; whatever they do not settle goes to the model, which only returns JSON with fixed fields, used only after validation | `rules.py`, `classify.py`, `llm.py`, `claude_cli.py` |
 | Memory | SQLite: which mail was handled, who each sender is, what the same thread said before, your labels | `state.py`, `memory.py` |
 | Action | Read-only by default. The one write is tagging "needs action" mail, off by default; it never sends or deletes | `pipeline.py` |
-| Push | Instant messages and the morning and evening digest, to the terminal, a Lark group bot, a Lark app bot, or handed to notify-hub, a local notification gateway | `notify.py`, `render.py` |
-| Scheduling | launchd runs `run` every hour (and once at install and login) and `digest` at 09:00 and 18:00 | `scripts/launchd.sh` |
+| Push | Instant messages and the digest three times a day, to the terminal, a Lark group bot, a Lark app bot, or handed to notify-hub, a local push tool. When to push (quiet hours, digest hours) is decided here | `notify.py`, `render.py`, `pipeline.py` |
+| Scheduling | launchd runs `run` every hour (and once at install and login) and `digest` at 08:00, 12:00 and 18:00 | `scripts/launchd.sh` |
 
 ## 2. The big picture
 
@@ -31,7 +31,7 @@ flowchart LR
         B <-->|"HTTP + token, local only"| T["Thunderbird + add-on<br/>Gmail, university mail"]
         M <--> D[("SQLite<br/>state.db")]
         R["rules.yaml"] --> M
-        M -.->|"optional"| H["notify-hub<br/>notification gateway"]
+        M -.->|"optional"| H["notify-hub<br/>push tool"]
     end
     M -->|"mail the rules did not settle"| A["Model<br/>DeepSeek API or Claude subscription"]
     M -->|"one-line summary"| K["Lark / Feishu"]
@@ -40,7 +40,7 @@ flowchart LR
 
 - Mail stays in Thunderbird on your computer. Like Claude Desktop, this program is an MCP client of thunderbird-mcp: it starts `mcp-bridge.cjs` over stdio, and the bridge reaches the add-on's local server on 127.0.0.1 with a token. Thunderbird handles every mailbox's sign-in and OAuth; the program never sees a mailbox password.
 - Only two things leave the computer: mail the rules did not settle goes to the model, and a one-line summary goes to Lark. See section 7.
-- Pushes can go straight to Lark, or be handed to [notify-hub](https://github.com/yuhang2551/notify-hub) on the same Mac. It is a separate small program shared by several projects that owns the Lark credentials, night-time quiet hours, de-duplication, rate limiting and retries. Why the split: section 6.
+- Pushes can go straight to Lark, or be handed to [notify-hub](https://github.com/yuhang2551/notify-hub) on the same Mac. It is a separate small program shared by several projects that only holds the Lark credentials and sends cards right away; the mail monitor decides when to push. Why the split: section 6.
 
 ## 3. One check, step by step
 
@@ -62,7 +62,7 @@ sequenceDiagram
     M->>A: prompt + memory + body (marked untrusted)
     A-->>M: JSON
     Note over M: validate, retry once if broken, else fall back to unsure
-    M->>K: needs action, unsure: push now
+    M->>K: needs action, unsure: push now (in quiet hours only what a rule marks urgent)
     M->>D: record verdict, sender identity, digest flag
 ```
 
@@ -74,9 +74,9 @@ This is `pipeline.run_once`, one step at a time:
 4. **Rules**: match `rules.yaml` in order; the first hit wins. Mail settled outright (verification codes, newsletters) is never opened and never sent to the model.
 5. **Read bodies**: the rest is fetched with `getMessages` in batches of 10 (the add-on returns at most 10 at a time). If a body cannot be read, the preview is used.
 6. **Recall and ask the model**: for each message, the metadata, memory and body (cut to 4,000 characters) go to the model, which returns JSON.
-7. **Settle** (`_settle`): update the sender's memory; tag "needs action" mail if that is switched on; decide between an instant push, the digest, or recording only; write the verdict back to the database.
+7. **Settle** (`_settle`): update the sender's memory; tag "needs action" mail if that is switched on; decide between an instant push, the digest, or recording only (during quiet hours, mail meant for an instant push goes into the digest unless a rule marks it urgent; a failed push goes into the digest too); write the verdict back to the database.
 
-`mail-monitor digest` is a separate entry point: it sends the batched mail as one message and marks it as digested. launchd runs it at 09:00 and 18:00.
+`mail-monitor digest` is a separate entry point: it sends the batched mail as one message and marks it as digested. launchd runs it at 08:00, 12:00 and 18:00; the 08:00 run also carries what quiet hours held back. If the digest cannot be pushed, nothing is marked and the mail waits for the next one.
 
 ## 4. How a verdict is made
 
@@ -92,8 +92,10 @@ flowchart TD
     V -->|"still broken after one retry"| F["Fallback: unsure"]
     F --> D
     D --> P{"How to push"}
-    P -->|"needs action, unsure"| I["Push now"]
-    P -->|"for your information"| G["Morning / evening digest"]
+    P -->|"needs action, unsure"| Q{"Quiet hours?"}
+    Q -->|"no, or a rule says urgent"| I["Push now"]
+    Q -->|"yes"| G
+    P -->|"for your information"| G["Digest at 08:00, 12:00, 18:00"]
     P -->|"rule says never"| X["Record only"]
 ```
 
@@ -160,7 +162,7 @@ A sender's identity has three sources, from highest to lowest priority: what you
 
 **Why SQLite and not a vector database?** Memory looks up "the same sender" and "the same thread", which exact matching handles, at the scale of a few thousand messages. SQLite is one file, needs no server, and backing it up means copying it.
 
-**Why a scheduled launchd job instead of a daemon?** Every run is a fresh process: if one crashes the next still runs, nothing runs while the Mac sleeps and one catch-up run happens on wake, and there are no reconnects or memory to manage. The price is starting the bridge again each time, a little extra startup.
+**Why a scheduled launchd job instead of a daemon?** Every run is a fresh process: if one crashes the next still runs, nothing runs while the Mac sleeps (and the Mac is not woken for it), and there are no reconnects or memory to manage. The price is starting the bridge again each time, a little extra startup.
 
 **Why check hourly by default?** Job-search and university mail can usually wait an hour, and the background job need not run often. Checking more often costs no extra model usage: the model only sees new mail, once per message, so the extra runs are a few seconds of checking each. Lower `RUN_INTERVAL` for faster pushes. With a long interval, the first check after booting would come late, so one run happens at install and at login.
 
@@ -170,9 +172,11 @@ A sender's identity has three sources, from highest to lowest priority: what you
 
 **Why push too much rather than too little?** Missing one email from your advisor or an interviewer costs far more than reading one extra push.
 
-**Why hand pushes to notify-hub instead of doing quiet hours and retries here?** Quiet hours, de-duplication, rate limiting and retries are needed by every program that sends notifications. Written into the mail monitor, the next project (an experiment script, the job-search assistant) would have to write them again. notify-hub turns them into one local command: the mail monitor only decides how urgent a message is and what its title and body say, and once handed over, its job is done. The hand-over runs notify-hub's command line in a subprocess rather than importing its Python package: each program has its own virtual environment, and the command line is the interface between them. Each message is handed over with its mail id as `--key`, so even if the same mail were handed over twice it would be pushed once. The two direct Lark routes remain, so notify-hub is optional.
+**Why hand pushes to notify-hub but keep the timing here?** Getting a card to Lark is something every program that notifies you needs: the Lark credentials, the look of the card, a few retries when Lark cannot be reached. notify-hub turns that into one local command shared by several projects. But only the mail monitor knows when it is worth disturbing you: whether a mail is from your advisor or a newsletter, and whether it can wait for the digest. So notify-hub only sends right away, and quiet hours, digest hours and moving failed pushes into the digest all live here. notify-hub used to have its own quiet hours, digest and scheduled job; with a timetable on each side, working out when a notification would arrive meant reading both sets of settings, so it was changed to this split (see the [changelog](../CHANGELOG_EN.md)). The hand-over runs notify-hub's command line in a subprocess rather than importing its Python package: each program has its own virtual environment, the command line is the interface between them, and the exit code says whether the push went out. The two direct Lark routes remain, so notify-hub is optional.
 
-**Why do only rules with `urgency: high` push at night?** Waking you up at night is expensive. Rules are written by you and can be trusted; the model's "urgent" can be swayed by an email's wording, and phishing loves the word "urgent". So a model-judged urgent mail still says so on its card, but during quiet hours it is held and goes out in one combined card when they end.
+**Why do only rules with `urgency: high` push at night?** Waking you up at night is expensive. Rules are written by you and can be trusted; the model's "urgent" can be swayed by an email's wording, and phishing loves the word "urgent". So a model-judged urgent mail still says so on its card, but during quiet hours it goes into the digest and arrives with the 08:00 one.
+
+**Why is mail held for quiet hours still recorded as an instant push?** `notify_mode` records the verdict; `pushed_at` and `digest_pending` record how the mail was finally delivered. The evaluation measures whether the verdicts are right: mail judged worth an instant push that only went into the digest because of the hour or a failed push still counts as caught.
 
 ## 7. Where your data goes
 
@@ -182,7 +186,7 @@ A sender's identity has three sources, from highest to lowest priority: what you
 | Verdicts, sender identities, your labels | `~/.mail-monitor/state.db` on your computer, with subjects and one-line summaries only |
 | Mail the rules did not settle: sender, recipients, subject, time, the first 4,000 characters of the body, related memory, your profile | The model you configured: DeepSeek by default for the API-key version, Anthropic for the Claude subscription version. How the backends differ: [Model backends](model-backends_EN.md#where-your-data-goes) |
 | Mail a rule settles outright (verification codes, newsletters …) | No model |
-| Pushes: who, what, deadline, suggestion, subject and time | Lark. No bodies; without a model verdict, "what" is the subject plus the first 80 characters of the preview. Through notify-hub they are also kept in its local outbox, `~/.notify-hub/outbox.db` |
+| Pushes: who, what, deadline, suggestion, subject and time | Lark. No bodies; without a model verdict, "what" is the subject plus the first 80 characters of the preview. notify-hub exits once it has sent and keeps nothing on your computer |
 | API key, Lark credentials | `~/.mail-monitor/.env`, created by `install.sh` with mode 600, never in the repository. With notify-hub, the Lark credentials live in its own `~/.notify-hub/.env` and are not needed here |
 
 ## 8. When something fails
@@ -194,10 +198,10 @@ A sender's identity has three sources, from highest to lowest priority: what you
 | A body cannot be read | The preview is used |
 | The model times out, errors, or returns something that is not JSON | One retry, then pushed as "unsure" |
 | No model configured | Everything the rules do not settle is pushed as "unsure" |
-| A direct Lark push fails | It moves into the digest and goes out with the next `digest` |
-| Through notify-hub, Lark cannot be reached | The message stays in notify-hub's outbox and is retried automatically; for the mail monitor it has been handed over |
-| notify-hub itself cannot run (not installed, command not found, no answer within 60 seconds) | Same as a failed direct push: it moves into the digest |
-| The Mac sleeps | launchd skips the runs and catches up once on wake; after more than 2 days away, catch up with `run --days 7` |
+| A push fails: a direct Lark push fails, or notify-hub still cannot reach Lark after retrying on the spot | It moves into the digest and goes out with the next `digest` |
+| notify-hub itself cannot run (not installed, command not found, no answer within 60 seconds) | Same: it moves into the digest |
+| A digest cannot be pushed | Nothing is marked as digested; the mail waits and goes out with the next digest |
+| The Mac sleeps | launchd runs nothing and does not wake the Mac: missed checks are skipped and the next comes within the hour after waking; a missed digest is sent once on wake. After more than 2 days away, catch up with `run --days 7` |
 | The same message in two inboxes | Merged by id and judged once |
 
 ## 9. Safety boundaries

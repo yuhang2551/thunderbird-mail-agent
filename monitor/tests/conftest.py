@@ -46,4 +46,7 @@ def fake_notify_hub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[st
 
 @pytest.fixture
 def settings(tmp_path: Path, fake_command: list[str]) -> Settings:
-    return Settings(mcp_command=fake_command, home=tmp_path, days_back=2, max_results=100, timezone="Asia/Dubai")
+    # 免打扰默认关掉：巡检用的是真时间，夜里跑测试结果也要一样。测免打扰的测试自己打开，再传一个固定的 now
+    return Settings(
+        mcp_command=fake_command, home=tmp_path, days_back=2, max_results=100, timezone="Asia/Dubai", quiet_hours="off"
+    )
