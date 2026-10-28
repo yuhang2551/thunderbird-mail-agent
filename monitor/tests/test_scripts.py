@@ -24,6 +24,29 @@ def test_variables_before_chinese_text_use_braces(script: Path):
     assert not bad, "\n".join(bad)
 
 
+DOCS = sorted(
+    path
+    for path in REPO.rglob("*.md")
+    if not any(part.startswith(".") or part == "node_modules" for part in path.relative_to(REPO).parts)
+)
+SHELL_FENCES = {"bash", "sh", "zsh", "shell", "console"}
+SHELL_COMMENT = re.compile(r"^\s*#(?!!)|\s#(\s|$)")
+
+
+def test_command_blocks_in_docs_have_no_comments():
+    """macOS 终端默认的 zsh 不认 # 注释：整行注释报 command not found: #，行尾注释会变成命令的参数。
+    命令块是整段粘进终端的，所以说明写在命令块外面。"""
+    bad = []
+    for doc in DOCS:
+        fence = None
+        for number, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("```"):
+                fence = None if fence is not None else line.strip("` \t")
+            elif fence in SHELL_FENCES and SHELL_COMMENT.search(line):
+                bad.append(f"{doc.relative_to(REPO)}:{number}: {line.strip()}")
+    assert DOCS and not bad, "\n".join(bad)
+
+
 LAUNCHD = REPO / "monitor" / "scripts" / "launchd.sh"
 
 

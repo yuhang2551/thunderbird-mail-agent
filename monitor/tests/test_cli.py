@@ -1,4 +1,5 @@
 import json
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -71,6 +72,23 @@ def test_doctor_and_init_explain_a_closed_thunderbird(tmp_path, monkeypatch):
 
     result = runner.invoke(app, ["init"])
     assert result.exit_code == 1 and "连不上 Thunderbird" in result.output, result.output
+
+
+def test_run_and_digest_lines_start_with_the_time(tmp_path, monkeypatch):
+    """定时任务的日志只留最后几行，每行开头带时间才看得出是哪次跑的。"""
+    dead = shlex.join([sys.executable, str(Path(__file__).parent / "dead_bridge.py")])
+    env = tmp_path / ".env"
+    env.write_text(f"MAIL_MONITOR_HOME={tmp_path}\nMAIL_MONITOR_MCP_COMMAND={dead}\nMAIL_MONITOR_TZ=Asia/Dubai\n", encoding="utf-8")
+    monkeypatch.setenv("MAIL_MONITOR_ENV", str(env))
+    runner = CliRunner()
+    stamp = r"\d\d-\d\d \d\d:\d\d "
+
+    result = runner.invoke(app, ["run"])
+    assert re.match(stamp + "收件箱 0 个", result.output), result.output
+    assert "连不上 Thunderbird" in result.output
+
+    result = runner.invoke(app, ["digest"])
+    assert result.exit_code == 0 and re.match(stamp + "没有待汇总的邮件", result.output), result.output
 
 
 def test_notify_test_through_notify_hub(tmp_path, monkeypatch, fake_notify_hub):

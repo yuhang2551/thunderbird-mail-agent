@@ -32,30 +32,37 @@ launchd 每小时 ──► mail-monitor run
 
 ```bash
 cd ~/thunderbird-mail-agent/monitor
-./scripts/install.sh     # 建 .venv、装依赖、生成 ~/.mail-monitor/.env 和 rules.yaml（需要 Python 3.10+）
+./scripts/install.sh
 source .venv/bin/activate
-# 然后编辑 ~/.mail-monitor/.env：选模型（填 DEEPSEEK_API_KEY，或者设 MAIL_MONITOR_LLM=claude 用 Claude 订阅；都不配也能跑），推送先保持 console；按自己的情况改 ~/.mail-monitor/rules.yaml
-
-mail-monitor doctor      # 自检：连得上 Thunderbird 吗、有哪些收件箱、推送和模型配好没
-mail-monitor init        # 首次运行：把现有邮件登记为已见，不推送旧邮件
-mail-monitor run --dry-run   # 看看它会怎么判断，不记录、不推送（也不带记忆）
-mail-monitor run         # 正式巡检一次
-mail-monitor digest      # 把攒着的邮件合成一条汇总发出去
-mail-monitor senders     # 看看它记住了哪些发件人、身份是怎么定的
-mail-monitor sender-set prof@example.edu 导师   # 手动告诉它某人是谁（优先级最高）
-mail-monitor review      # 逐条核对它的判断，标出到底要不要管
-mail-monitor eval        # 用标注算准确率：漏推几封、噪声几封
 ```
+
+`install.sh` 建 `.venv`、装依赖、生成 `~/.mail-monitor/.env` 和 `rules.yaml`（需要 Python 3.10+）。然后编辑 `~/.mail-monitor/.env`：选模型（填 `DEEPSEEK_API_KEY`，或者设 `MAIL_MONITOR_LLM=claude` 用 Claude 订阅；都不配也能跑），推送先保持 `console`；按自己的情况改 `~/.mail-monitor/rules.yaml`。
+
+本页的命令块里不写注释，可以整段粘进 macOS 的终端：zsh 默认不把行尾的 `#` 当注释，会当成参数传给命令。
+
+| 命令 | 作用 |
+|---|---|
+| `mail-monitor doctor` | 自检：连得上 Thunderbird 吗、有哪些收件箱、推送和模型配好没 |
+| `mail-monitor init` | 首次运行：把现有邮件登记为已见，不推送旧邮件 |
+| `mail-monitor run --dry-run` | 看看它会怎么判断，不记录、不推送（也不带记忆） |
+| `mail-monitor run` | 正式巡检一次 |
+| `mail-monitor digest` | 把攒着的邮件合成一条汇总发出去 |
+| `mail-monitor senders` | 看看它记住了哪些发件人、身份是怎么定的 |
+| `mail-monitor sender-set prof@example.edu 导师` | 手动告诉它某人是谁（优先级最高） |
+| `mail-monitor review` | 逐条核对它的判断，标出到底要不要管 |
+| `mail-monitor eval` | 用标注算准确率：漏推几封、噪声几封 |
 
 ### 定时运行
 
 macOS 用 launchd（比常驻进程稳：电脑睡眠时不跑，醒来补跑一次；开机登录时也先跑一次）：
 
 ```bash
-./scripts/launchd.sh install     # 装上先 run 一次，之后每小时一次；每天 9 点和 18 点各 digest 一次
-./scripts/launchd.sh status      # 看装没装、上次退出码、日志最后几行
+./scripts/launchd.sh install
+./scripts/launchd.sh status
 ./scripts/launchd.sh uninstall
 ```
+
+`install` 装上先 run 一次，之后每小时一次，每天 9 点和 18 点各 digest 一次；`status` 看装没装、上次退出码、日志最后几行（每行开头是那次运行的时间）；`uninstall` 卸掉。
 
 间隔和时间可以改，比如每 30 分钟巡检、8 点 13 点 20 点汇总：`RUN_INTERVAL=1800 DIGEST_HOURS="8 13 20" ./scripts/launchd.sh install`。查得勤不会多花模型额度，模型只看新邮件，每封只判断一次。`./scripts/launchd.sh print` 只打印要装的内容，不安装。日志在 `~/.mail-monitor/logs/`。
 
@@ -104,9 +111,11 @@ Linux 用 cron：
 6. 在 Lark 里建一个群（只有你自己也行），添加机器人 → 选这个应用。然后：
 
 ```bash
-mail-monitor lark-chats                     # 列出机器人所在的群和 chat_id
-mail-monitor lark-chats --email 你的邮箱     # 顺便查 open_id（私聊推送用）
+mail-monitor lark-chats
+mail-monitor lark-chats --email 你的邮箱
 ```
+
+第一行列出机器人所在的群和 chat_id，第二行顺便查你的 open_id（私聊推送用）。
 
 把结果写进 `.env`：`MAIL_MONITOR_NOTIFY=lark_app`、`LARK_RECEIVE_ID=…`。`oc_` 开头的群 id 会自动按群发，`ou_` 开头的 open_id 按私聊发，`LARK_RECEIVE_ID_TYPE` 不用填。
 
@@ -185,8 +194,10 @@ Agent 项目没有数字站不住脚，所以带了一个最小的评测闭环�
 ## 开发
 
 ```bash
-pytest            # 用 tests/fake_server.py 模拟 thunderbird-mcp、fake_claude.py 模拟 claude、fake_notify_hub.py 模拟 notify-hub，不需要 Thunderbird 和账号
+pytest
 ```
+
+测试用 `tests/fake_server.py` 模拟 thunderbird-mcp、`fake_claude.py` 模拟 claude、`fake_notify_hub.py` 模拟 notify-hub，不需要 Thunderbird 和账号。
 
 | 路径 | 内容 |
 |---|---|

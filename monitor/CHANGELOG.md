@@ -6,11 +6,11 @@
 
 ## 下一段
 
-1. 在 Mac 上 `git pull`，`.env` 里的推送改成 `notify_hub`，`mail-monitor init` 把现有邮件登记为已见，`./scripts/launchd.sh install` 装上定时任务，真正跑起来。
+1. 等第一封新邮件进来，用 `./scripts/launchd.sh status` 看一眼：定时任务里调 Claude 判断、经 notify-hub 推送都正常。
 2. 用一周：`review` 标注、`eval` 看漏推率和噪声率，按结果调规则和提示词。顺手把 `rules.yaml` 里导师那条的示例地址换成真的，写上 `MAIL_MONITOR_PROFILE`。
 3. ChatGPT 订阅版（做法已写在[模型后端](docs/model-backends.md)里，先不急）。
 
-## 2026-10-28 · 定时任务改成每小时一次
+## 2026-10-28 · 定时任务改成每小时一次，Mac 上跑起来了
 
 **改动**
 
@@ -20,10 +20,19 @@
 - launchd 的 PATH 加上 `~/.local/bin`，claude 和 notify-hub 都装在这里。
 - 新增 `./scripts/launchd.sh print`：只打印要装的 plist，不安装；测试也用它检查生成的内容。
 
+**真机实测**（2026-10-28，Mac）
+
+- `git pull` 到这一版，`.env` 里改成 `MAIL_MONITOR_LLM=claude`（Claude 订阅版）和 `MAIL_MONITOR_NOTIFY=notify_hub`，`doctor` 全部通过。
+- `mail-monitor init` 把两个收件箱里现有的 111 封登记为已见。
+- `./scripts/launchd.sh install` 装上后马上巡检了一次，`status` 显示退出码 0：两个收件箱拉到 35 封，新邮件 0 封。说明 launchd 里找得到 node，也连得上 Thunderbird。
+- 还没验证到的：定时任务里调 Claude 判断、经 notify-hub 推送，要等第一封新邮件。
+
 **实测中发现并改好**
 
 - `notify-test` 经 notify-hub 发的时候，结果打了两遍（日志一遍、结果一遍）。现在只打一遍；巡检时要看 notify-hub 的回答，加 `-v`。
-- 测试 103 个。
+- `run` 和 `digest` 输出的那一行开头带上时间（比如 `10-28 13:00 收件箱 2 个…`）。`status` 只显示日志最后几行，原来分不清是哪次跑的。
+- README 和文档里的命令块去掉了注释，说明挪到命令块外面。macOS 终端默认的 zsh 不认 `#` 注释：整行注释会报 `command not found: #`，行尾注释会变成命令的参数，比如 `mail-monitor doctor  # 自检` 会报多了参数，`./scripts/create-mail-workspace.sh  # 默认生成 ~/mail-workspace` 会建出一个叫 `#` 的文件夹。加了一个测试检查文档里的命令块。
+- 测试 105 个。
 
 ## 2026-10-27 · 推送可以交给 notify-hub
 

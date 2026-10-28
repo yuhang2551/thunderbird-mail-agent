@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -29,6 +30,11 @@ app = typer.Typer(
 
 def _settings() -> Settings:
     return load_settings()
+
+
+def _stamp(settings: Settings) -> str:
+    """每次运行输出的开头写上时间：定时任务的日志攒了一周，也分得清哪行是哪次跑的。"""
+    return fmt_time(datetime.now(timezone.utc), settings.timezone)
 
 
 @app.callback()
@@ -143,7 +149,7 @@ def run(
     if days:
         settings = settings.model_copy(update={"days_back": days})
     report = asyncio.run(run_once(settings, dry_run=dry_run))
-    typer.echo(report.summary())
+    typer.echo(f"{_stamp(settings)} {report.summary()}")
     for error in report.errors:
         typer.echo(f"⚠️  {error}")
     raise typer.Exit(code=1 if report.errors and report.new == 0 and report.fetched == 0 else 0)
@@ -156,7 +162,7 @@ def digest() -> None:
 
     settings = _settings()
     count = asyncio.run(send_digest(settings))
-    typer.echo("没有待汇总的邮件" if count == 0 else f"已汇总 {count} 封")
+    typer.echo(f"{_stamp(settings)} " + ("没有待汇总的邮件" if count == 0 else f"已汇总 {count} 封"))
 
 
 @app.command("rules")

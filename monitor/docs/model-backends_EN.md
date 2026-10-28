@@ -25,10 +25,12 @@ All three backends share the same prompt, the same output structure, and the sam
 
 In `~/.mail-monitor/.env`:
 
-```bash
+```ini
 DEEPSEEK_API_KEY=sk-...
-LLM_MODEL=deepseek-flash      # optional, this is the default
+LLM_MODEL=deepseek-flash
 ```
+
+`LLM_MODEL` is optional; `deepseek-flash` is the default.
 
 The program sends one request to `{LLM_BASE_URL}/chat/completions` in JSON mode (`response_format: {"type": "json_object"}`), at temperature 0 with at most 800 tokens. There is no vendor SDK; one HTTP request is all it takes.
 
@@ -89,10 +91,10 @@ One thing to test while building it: the docs for this route do not say whether 
 
 Optional: `MAIL_MONITOR_CLAUDE_MODEL` (default `sonnet`; `haiku` uses less of the allowance), `MAIL_MONITOR_CLAUDE_BIN` (if launchd cannot find claude, the full path that `which claude` shows), `MAIL_MONITOR_CLAUDE_TIMEOUT` (seconds to wait per message, default 180).
 
-**For each message that needs the model, the program makes this call once**:
+**For each message that needs the model, the program makes this call once, in an empty directory (`~/.mail-monitor/claude-run`)**:
 
 ```bash
-cd ~/.mail-monitor/claude-run          # an empty directory
+cd ~/.mail-monitor/claude-run
 claude -p --safe-mode \
   --tools "" --strict-mcp-config \
   --permission-prompts none \
@@ -140,11 +142,11 @@ The `result` field of the returned JSON holds the model's answer. The program ex
 
 ### Switching backends
 
-```bash
-MAIL_MONITOR_LLM=api        # api (default) | claude; chatgpt is not built yet
+```ini
+MAIL_MONITOR_LLM=api
 ```
 
-Both backends sit behind one interface in the code, `chat_json(system, user) -> dict`: the API-key version in `llm.py`, the Claude subscription version in `claude_cli.py`. The prompt, output structure, Pydantic validation, retry and fallback all live in the verdict layer (`classify.py`) and are shared; the only new thing the verdict layer knows is that errors such as "not signed in" or "allowance used up" are not worth retrying. Tests use a fake `claude` command (`tests/fake_claude.py`), with no real account.
+The value is `api` (the default) or `claude`; the ChatGPT version is not built yet. Both backends sit behind one interface in the code, `chat_json(system, user) -> dict`: the API-key version in `llm.py`, the Claude subscription version in `claude_cli.py`. The prompt, output structure, Pydantic validation, retry and fallback all live in the verdict layer (`classify.py`) and are shared; the only new thing the verdict layer knows is that errors such as "not signed in" or "allowance used up" are not worth retrying. Tests use a fake `claude` command (`tests/fake_claude.py`), with no real account.
 
 ## Where your data goes
 

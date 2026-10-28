@@ -25,10 +25,12 @@
 
 在 `~/.mail-monitor/.env` 里填：
 
-```bash
+```ini
 DEEPSEEK_API_KEY=sk-...
-LLM_MODEL=deepseek-flash      # 可选，默认就是它
+LLM_MODEL=deepseek-flash
 ```
+
+`LLM_MODEL` 可以不写，默认就是 `deepseek-flash`。
 
 程序向 `{LLM_BASE_URL}/chat/completions` 发一个请求，用 JSON 模式（`response_format: {"type": "json_object"}`）要求只输出 JSON，温度 0，最多 800 个 token。没有用任何厂商的 SDK，一个 HTTP 请求就够了。
 
@@ -89,10 +91,10 @@ ChatGPT Plus / Pro、Claude Pro / Max 这些订阅本身不带 API，是给两�
 
 可选配置：`MAIL_MONITOR_CLAUDE_MODEL`（默认 `sonnet`，想省额度改成 `haiku`）、`MAIL_MONITOR_CLAUDE_BIN`（launchd 定时跑时找不到 claude，就写 `which claude` 显示的完整路径）、`MAIL_MONITOR_CLAUDE_TIMEOUT`（一封最多等几秒，默认 180）。
 
-**每封需要模型判断的邮件，程序这样调用一次**：
+**每封需要模型判断的邮件，程序在一个空目录（`~/.mail-monitor/claude-run`）里这样调用一次**：
 
 ```bash
-cd ~/.mail-monitor/claude-run          # 一个空目录
+cd ~/.mail-monitor/claude-run
 claude -p --safe-mode \
   --tools "" --strict-mcp-config \
   --permission-prompts none \
@@ -140,11 +142,11 @@ claude -p --safe-mode \
 
 ### 切换后端
 
-```bash
-MAIL_MONITOR_LLM=api        # api（默认）| claude；chatgpt 还没做
+```ini
+MAIL_MONITOR_LLM=api
 ```
 
-两种后端在程序里是同一个接口 `chat_json(system, user) -> dict`：API 版在 `llm.py`，Claude 订阅版在 `claude_cli.py`。提示词、输出结构、Pydantic 校验、失败重试、退回"拿不准"都在判断层（`classify.py`），两种后端共用；判断层只多认一件事：没登录、额度用完这类错误重试也没用，就不再重试。测试用一个假的 `claude` 命令（`tests/fake_claude.py`），不需要真账号。
+可以填 `api`（默认）或 `claude`，ChatGPT 版还没做。两种后端在程序里是同一个接口 `chat_json(system, user) -> dict`：API 版在 `llm.py`，Claude 订阅版在 `claude_cli.py`。提示词、输出结构、Pydantic 校验、失败重试、退回"拿不准"都在判断层（`classify.py`），两种后端共用；判断层只多认一件事：没登录、额度用完这类错误重试也没用，就不再重试。测试用一个假的 `claude` 命令（`tests/fake_claude.py`），不需要真账号。
 
 ## 数据去哪了
 

@@ -6,11 +6,11 @@ Recorded increment by increment: what each step added, how far it was verified o
 
 ## Next
 
-1. On the Mac: `git pull`, switch push in `.env` to `notify_hub`, mark existing mail as seen with `mail-monitor init`, install the schedule with `./scripts/launchd.sh install`, and let it run for real.
+1. When the first new mail arrives, check `./scripts/launchd.sh status`: the scheduled job should call Claude for the verdict and push through notify-hub.
 2. Use it for a week: label with `review`, check the miss and noise rates with `eval`, and tune the rules and prompt from the results. Along the way, replace the example address in the advisor rule of `rules.yaml` and set `MAIL_MONITOR_PROFILE`.
 3. The ChatGPT subscription version (designed in [Model backends](docs/model-backends_EN.md), not urgent).
 
-## 2026-10-28 · The schedule checks hourly
+## 2026-10-28 · The schedule checks hourly, running on the Mac
 
 **Changed**
 
@@ -20,10 +20,19 @@ Recorded increment by increment: what each step added, how far it was verified o
 - launchd's PATH now includes `~/.local/bin`, where claude and notify-hub are installed.
 - New `./scripts/launchd.sh print`: prints the plists without installing them; the tests use it to check what is generated.
 
+**Tested on the real machine** (2026-10-28, Mac)
+
+- `git pull` to this version, `.env` switched to `MAIL_MONITOR_LLM=claude` (the Claude subscription version) and `MAIL_MONITOR_NOTIFY=notify_hub`; `doctor` passed every check.
+- `mail-monitor init` marked the 111 existing messages in the two inboxes as seen.
+- `./scripts/launchd.sh install` ran one check right away, and `status` showed exit code 0: 35 messages fetched from the two inboxes, 0 new. So under launchd it finds node and reaches Thunderbird.
+- Not verified yet: calling Claude for the verdict and pushing through notify-hub from the scheduled job; that waits for the first new mail.
+
 **Found and fixed while testing**
 
 - Through notify-hub, `notify-test` printed its result twice (once as a log line, once as the result). It now prints once; to see notify-hub's answers during a check, add `-v`.
-- 103 tests.
+- The line that `run` and `digest` print now starts with the time (for example `10-28 13:00 收件箱 2 个…`). `status` only shows the last lines of the logs, and before this you could not tell which run a line came from.
+- The command blocks in the READMEs and docs no longer contain comments; the explanations moved outside the blocks. zsh, the default shell in the macOS terminal, does not treat `#` as a comment: a comment line reports `command not found: #`, and a trailing comment becomes arguments to the command. For example `mail-monitor doctor  # self-check` fails with extra arguments, and `./scripts/create-mail-workspace.sh  # creates ~/mail-workspace by default` would create a folder named `#`. A new test checks the command blocks in the docs.
+- 105 tests.
 
 ## 2026-10-27 · Pushes can go through notify-hub
 

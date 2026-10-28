@@ -106,18 +106,20 @@ Download it from [thunderbird.net](https://www.thunderbird.net) and add each mai
 Download the **LTS installer** from [nodejs.org](https://nodejs.org) (`.pkg` on macOS). The installer is better than nvm here: its path doesn't change, so GUI agents can always find it.
 
 ```bash
-node -v   # prints a version number if it worked
+node -v
 ```
+
+If it prints a version number, Node is installed.
 
 ### Step 3: Install the thunderbird-mcp add-on (pinned version)
 
 ```bash
 git clone https://github.com/yuhang2551/thunderbird-mail-agent.git ~/thunderbird-mail-agent
 cd ~/thunderbird-mail-agent
-./scripts/install-thunderbird-mcp.sh      # downloads v0.9.2 to ~/thunderbird-mcp and verifies its SHA-256
+./scripts/install-thunderbird-mcp.sh
 ```
 
-Then in Thunderbird: **Tools → Add-ons and Themes → gear icon → Install Add-on From File**, choose `~/thunderbird-mcp/dist/thunderbird-mcp.xpi`, and restart Thunderbird once.
+The script downloads v0.9.2 to `~/thunderbird-mcp` and verifies its SHA-256. Then in Thunderbird: **Tools → Add-ons and Themes → gear icon → Install Add-on From File**, choose `~/thunderbird-mcp/dist/thunderbird-mcp.xpi`, and restart Thunderbird once.
 
 > The install prompt says the add-on has full access to Thunderbird and your computer. That's because it uses Thunderbird's Experiment API to run a local server. See [docs/security.md](docs/security.md) for the explanation and what we checked in the code.
 
@@ -145,10 +147,10 @@ Once the agent has the tools, it also needs to know **how** to handle mail: read
 - **Claude Code / Codex / phone**: run the command below to create a dedicated folder with `CLAUDE.md` / `AGENTS.md` (rules), `.mcp.json` (connection), `.claude/settings.json` (read-only tools need no confirmation) and `upcoming-events.md` (event list).
 
 ```bash
-./scripts/create-mail-workspace.sh        # creates ~/mail-workspace by default
+./scripts/create-mail-workspace.sh
 ```
 
-Open `~/mail-workspace/CLAUDE.md` and fill in the "我的邮箱" ("my mailboxes") section: your addresses, reply language, signature and time zone.
+It creates `~/mail-workspace` by default; to put it somewhere else, add the folder path after the command. Open `~/mail-workspace/CLAUDE.md` and fill in the "我的邮箱" ("my mailboxes") section: your addresses, reply language, signature and time zone.
 
 ### Step 6: Try it
 
