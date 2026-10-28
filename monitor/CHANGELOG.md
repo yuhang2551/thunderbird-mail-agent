@@ -6,10 +6,9 @@
 
 ## 下一段
 
-1. 在 Mac 上先按 notify-hub [README](https://github.com/yuhang2551/notify-hub#从-02-升级) 里「从 0.2 升级」的步骤把它升到 0.3：用 0.2 把存着的消息发掉、卸掉它的定时任务，再升级。然后这边 `git pull`，再运行一次 `./scripts/launchd.sh install`，汇总换成 8、12、18 点。
-2. 等第一封新邮件进来，用 `./scripts/launchd.sh status` 看一眼：定时任务里调 Claude 判断、经 notify-hub 推送都正常。
-3. 用一周：`review` 标注、`eval` 看漏推率和噪声率，按结果调规则和提示词。顺手把 `rules.yaml` 里导师那条的示例地址换成真的，写上 `MAIL_MONITOR_PROFILE`。
-4. ChatGPT 订阅版（做法已写在[模型后端](docs/model-backends.md)里，先不急）。
+1. 看两张汇总卡到没到：10-28 18 点是按新时间发的第一次汇总，带上白天攒下的 11 封；第二天 8 点那次带上夜里免打扰时段留下的。
+2. 用一周：`review` 标注、`eval` 看漏推率和噪声率，按结果调规则和提示词。顺手把 `rules.yaml` 里导师那条的示例地址换成真的（不换的话夜里什么都不推，全留到 8 点），写上 `MAIL_MONITOR_PROFILE`。
+3. ChatGPT 订阅版（做法已写在[模型后端](docs/model-backends.md)里，先不急）。
 
 ## 2026-10-28 · 什么时候推，全由邮件监控定
 
@@ -32,6 +31,14 @@ notify-hub 0.2 自己也管时间：免打扰、汇总、每天三次的定时�
 - README、架构说明、FAQ 里「notify-hub 管免打扰、去重、失败重发」的说法都改掉了，README 加了一节「什么时候推」。
 - 原来几处写着「电脑睡眠时不跑，醒来补跑一次」，对巡检不对。按[苹果的 launchd 文档](https://developer.apple.com/library/mac/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html)，按间隔跑的任务（巡检）睡眠中错过的直接跳过，醒来后到下一个间隔才跑；按钟点跑的任务（汇总）赶上睡眠的，醒来补跑一次。launchd 也不会为任务叫醒电脑。巡检每次回看两天，所以睡眠期间的邮件不会漏，只是醒来后最多晚一小时。
 - 根目录 README 还写着每 5 分钟巡检，改成了每小时。
+
+**真机实测**（2026-10-28，Mac，钟点是 Mac 上的时间）
+
+- 升级前，定时任务已经在后台真正干活了：11:36 到 13:37 的三次巡检来了 12 封新邮件，规则定了 2 封，Claude 订阅版判断了 10 封；1 封即时推送（经 notify-hub，当时还是 0.2.1），11 封进汇总，记住了 8 个发件人的身份。在 launchd 里调 Claude 判断、经 notify-hub 推送，这是第一次验证到。
+- 13:45 按 notify-hub README 的顺序把它升到 0.3.0，`launchctl list` 里已经没有它原来的定时任务。
+- `git pull` 到这一版，`doctor` 全部通过：推送一行显示 notify-hub 0.3.0，免打扰一行显示 23:00-08:00。
+- `./scripts/launchd.sh install` 重装，汇总改成每天 8、12、18 点；装上时那次巡检退出码 0，新邮件 0 封。
+- 还没验证到的：按新时间发的第一次汇总（当天 18 点，带上白天攒下的 11 封），和夜里的免打扰。
 
 ## 2026-10-28 · 定时任务改成每小时一次，Mac 上跑起来了
 
